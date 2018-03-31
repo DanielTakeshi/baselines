@@ -62,7 +62,7 @@ def get_perturbed_actor_updates(actor, perturbed_actor, param_noise_stddev):
 
 
 class DDPG(object):
-    def __init__(self, actor, critic, memory, demo_memory, observation_shape, action_shape, state_shape, aux_shape, param_noise=None, action_noise=None,
+    def __init__(self, actor, critic, memory, observation_shape, action_shape, state_shape, aux_shape, param_noise=None, action_noise=None,
         gamma=0.99, tau=0.001, normalize_returns=False, enable_popart=False, normalize_observations=True, normalize_state=True, normalize_aux=True,
         batch_size=128, observation_range=(0., 1.), action_range=(-1., 1.), state_range=(-4, 4), return_range=(-np.inf, np.inf), aux_range=(-10, 10),
         adaptive_param_noise=True, adaptive_param_noise_policy_threshold=.1,
@@ -89,7 +89,6 @@ class DDPG(object):
         self.gamma = gamma
         self.tau = tau
         self.memory = memory
-        self.demo_memory = demo_memory
         self.normalize_observations = normalize_observations
         self.normalize_returns = normalize_returns
         self.normalize_state = normalize_state
@@ -173,6 +172,8 @@ class DDPG(object):
         self.critic_with_actor_tf = denormalize(tf.clip_by_value(self.normalized_critic_with_actor_tf, self.return_range[0], self.return_range[1]), self.ret_rms)
         Q_obs1 = denormalize(target_critic(normalized_state1, normalized_goal, target_actor(normalized_obs1, normalized_aux1), normalized_aux1), self.ret_rms)
         self.target_Q = self.rewards + (1. - self.terminals1) * gamma * Q_obs1
+        self.importance_weights = tf.placeholder(tf.float32, shape=(None, 1), name='importance_weights')
+
 
         # Set up parts.
         if self.param_noise is not None:
@@ -222,7 +223,9 @@ class DDPG(object):
         logger.info('setting up critic optimizer')
 
         normalized_critic_target_tf = tf.clip_by_value(normalize(self.critic_target, self.ret_rms), self.return_range[0], self.return_range[1])
-        self.critic_loss = tf.reduce_mean(tf.square(self.normalized_critic_tf - normalized_critic_target_tf))
+        self.td_error = tf.square(self.normalized_critic_tf - normalized_critic_target_tf)
+        td_loss = tf.reduce_mean(self.importance_weights * self.td_error)
+        self.critic_loss = tf.reduce_mean(td_loss)
         if self.critic_l2_reg > 0.:
             critic_reg_vars = [var for var in self.critic.trainable_vars if 'kernel' in var.name and 'output' not in var.name]
             for var in critic_reg_vars:
@@ -320,7 +323,7 @@ class DDPG(object):
     def store_transition(self, state, obs0, action, reward, state1, obs1, terminal1, goal, goalobs, aux0, aux1, demo=False):
         reward *= self.reward_scale
         if demo:
-            self.demo_memory.append(state, obs0, action, reward, state1, obs1, terminal1, goal, goalobs, aux0, aux1)
+            self.memory.append_demonstration(state, obs0, action, reward, state1, obs1, terminal1, goal, goalobs, aux0, aux1)
         else:
             self.memory.append(state, obs0, action, reward, state1, obs1, terminal1, goal, goalobs, aux0, aux1)
         if self.normalize_observations:
@@ -334,13 +337,7 @@ class DDPG(object):
 
     def train(self):
         # Get a batch.
-        rand = np.random.uniform(0,1)
-        if (rand < 0.2):
-            batch = self.demo_memory.sample(batch_size=self.batch_size)
-        else:
-            batch = self.memory.sample(batch_size=self.batch_size)
-
-
+        batch = self.memory.sample(batch_size=self.batch_size, beta=0.4)
         if self.normalize_returns and self.enable_popart:
             old_mean, old_std, target_Q = self.sess.run([self.ret_rms.mean, self.ret_rms.std, self.target_Q], feed_dict={
                 self.obs1: batch['obs1'],
@@ -376,15 +373,17 @@ class DDPG(object):
             })
 
         # Get all gradients and perform a synced update.
-        ops = [self.actor_grads, self.actor_loss, self.critic_grads, self.critic_loss]
-        actor_grads, actor_loss, critic_grads, critic_loss = self.sess.run(ops, feed_dict={
+        ops = [self.actor_grads, self.actor_loss, self.critic_grads, self.critic_loss, self.td_error]
+        actor_grads, actor_loss, critic_grads, critic_loss, td_errors = self.sess.run(ops, feed_dict={
             self.obs0: batch['obs0'],
             self.state0: batch['states0'],
             self.aux0: batch['aux0'],
             self.goal: batch['goals'],
             self.actions: batch['actions'],
             self.critic_target: target_Q,
+            self.importance_weights: batch['weights'],
         })
+        self.memory.update_priorities(batch['idxes'], td_errors)
         self.actor_optimizer.update(actor_grads, stepsize=self.actor_lr)
         self.critic_optimizer.update(critic_grads, stepsize=self.critic_lr)
 
@@ -408,7 +407,8 @@ class DDPG(object):
         if self.stats_sample is None:
             # Get a sample and keep that fixed for all further computations.
             # This allows us to estimate the change in value for the same set of inputs.
-            self.stats_sample = self.memory.sample(batch_size=self.batch_size)
+            # TODO
+            self.stats_sample = self.memory.sample(batch_size=self.batch_size, beta=0.4)
         values = self.sess.run(self.stats_ops, feed_dict={
             self.obs0: self.stats_sample['obs0'],
             self.actions: self.stats_sample['actions'],
@@ -431,7 +431,7 @@ class DDPG(object):
             return 0.
 
         # Perturb a separate copy of the policy to adjust the scale for the next "real" perturbation.
-        batch = self.memory.sample(batch_size=self.batch_size)
+        batch = self.memory.sample(batch_size=self.batch_size, beta=0.4)
         self.sess.run(self.perturb_adaptive_policy_ops, feed_dict={
             self.param_noise_stddev: self.param_noise.current_stddev,
         })
