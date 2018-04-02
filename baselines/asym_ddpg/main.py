@@ -127,6 +127,8 @@ def parse_args():
     parser.add_argument('--num-pretrain-steps', type=int, default=2000)
     parser.add_argument('--run-name', type=str, default='')
     parser.add_argument('--demo-policy', type=str, default='None')
+    parser.add_argument('--lambda-pretrain', type=float, default=0.0)
+
     boolean_flag(parser, 'evaluation', default=True)
 
     args = parser.parse_args()
