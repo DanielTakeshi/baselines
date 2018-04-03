@@ -128,6 +128,9 @@ def parse_args():
     parser.add_argument('--run-name', type=str, default='')
     parser.add_argument('--demo-policy', type=str, default='None')
     parser.add_argument('--lambda-pretrain', type=float, default=0.0)
+    parser.add_argument('--lambda-nstep', type=float, default=1.0)
+    parser.add_argument('--lambda-1step', type=float, default=1.0)
+    parser.add_argument('--replay-beta', type=float, default=0.4)
 
     boolean_flag(parser, 'evaluation', default=True)
 
