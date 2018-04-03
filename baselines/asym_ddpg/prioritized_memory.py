@@ -63,9 +63,6 @@ class Memory(object):
     def sample_rollout(self, batch_size, nsteps, beta, gamma):
         raise Exception("Not implemented")
 
-
-
-
 class PrioritizedMemory(Memory):
     def __init__(self, limit, alpha, transition_small_epsilon=1e-6, demonstartion_epsilon=0.1):
 

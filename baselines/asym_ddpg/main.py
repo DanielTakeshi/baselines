@@ -89,7 +89,6 @@ def run(env_id, seed, noise_type, layer_norm, evaluation,demo_policy, **kwargs):
         demo_policy_object = demo.policies[demo_policy]()
     training.train(env=env, eval_env=eval_env, param_noise=param_noise,
         action_noise=action_noise, actor=actor, critic=critic, memory=memory, demo_policy=demo_policy_object, demo_env=demo_env, **kwargs)
-
     env.close()
     if eval_env is not None:
         eval_env.close()
@@ -128,6 +127,8 @@ def parse_args():
     parser.add_argument('--num-pretrain-steps', type=int, default=2000)
     parser.add_argument('--run-name', type=str, default='')
     parser.add_argument('--demo-policy', type=str, default='None')
+    parser.add_argument('--lambda-pretrain', type=float, default=0.0)
+
     boolean_flag(parser, 'evaluation', default=True)
 
     args = parser.parse_args()
