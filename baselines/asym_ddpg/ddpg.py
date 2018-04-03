@@ -12,6 +12,9 @@ from baselines.common.mpi_running_mean_std import RunningMeanStd
 from mpi4py import MPI
 import cv2
 
+from pathlib import Path
+home = str(Path.home())
+
 def normalize(x, stats):
     if stats is None:
         return x
@@ -66,7 +69,8 @@ class DDPG(object):
         gamma=0.99, tau=0.001, normalize_returns=False, enable_popart=False, normalize_observations=True, normalize_state=True, normalize_aux=True,
         batch_size=128, observation_range=(0., 1.), action_range=(-1., 1.), state_range=(-4, 4), return_range=(-np.inf, np.inf), aux_range=(-10, 10),
         adaptive_param_noise=True, adaptive_param_noise_policy_threshold=.1,
-        critic_l2_reg=0., actor_lr=1e-4, critic_lr=1e-3, clip_norm=None, reward_scale=1.):
+        critic_l2_reg=0.001, actor_lr=1e-4, critic_lr=1e-3, clip_norm=None, reward_scale=1., replay_beta=0.4,lambda_1step=1.0, lambda_nstep=1.0, nsteps=10, run_name="unnamed_run", lambda_pretrain=0.0):
+
         # Inputs.
         self.obs0 = tf.placeholder(tf.float32, shape=(None,) + observation_shape, name='obs0')
         self.obs1 = tf.placeholder(tf.float32, shape=(None,) + observation_shape, name='obs1')
@@ -79,10 +83,19 @@ class DDPG(object):
         self.rewards = tf.placeholder(tf.float32, shape=(None, 1), name='rewards')
         self.actions = tf.placeholder(tf.float32, shape=(None,) + action_shape, name='actions')
         self.critic_target = tf.placeholder(tf.float32, shape=(None, 1), name='critic_target')
+
+        self.nstep_steps = tf.placeholder(tf.float32, shape=(None, 1), name='nstep_reached')
+        self.nstep_critic_target = tf.placeholder(tf.float32, shape=(None, 1), name='nstep_critic_target')
+
+
         self.param_noise_stddev = tf.placeholder(tf.float32, shape=(), name='param_noise_stddev')
 
         self.aux0 = tf.placeholder(tf.float32, shape=(None,) + aux_shape, name='aux0')
         self.aux1 = tf.placeholder(tf.float32, shape=(None,) + aux_shape, name='aux1')
+
+        self.pretraining_tf = tf.placeholder(tf.float32, shape=(None, 1),
+                                             name='pretraining_tf')  # whether we use pre training or not
+        self.lambda_pretrain_in = tf.placeholder(tf.float32, shape=None, name='lamdba_pretrain_in')
         # Parameters.
 
         self.aux_shape = aux_shape
@@ -110,6 +123,12 @@ class DDPG(object):
         self.batch_size = batch_size
         self.stats_sample = None
         self.critic_l2_reg = critic_l2_reg
+        self.lambda_nstep = lambda_nstep
+        self.lambda_1step = lambda_1step
+        self.nsteps = nsteps
+        self.beta = replay_beta
+        self.run_name = run_name
+        self.lambda_pretrain = lambda_pretrain
 
         # Observation normalization.
         if self.normalize_observations:
@@ -171,9 +190,32 @@ class DDPG(object):
         self.normalized_critic_with_actor_tf = critic(normalized_state0, normalized_goal, self.actor_tf, normalized_aux0, reuse=True)
         self.critic_with_actor_tf = denormalize(tf.clip_by_value(self.normalized_critic_with_actor_tf, self.return_range[0], self.return_range[1]), self.ret_rms)
         Q_obs1 = denormalize(target_critic(normalized_state1, normalized_goal, target_actor(normalized_obs1, normalized_aux1), normalized_aux1), self.ret_rms)
+<<<<<<< pretraining-without-actor-loss
+        self.target_Q = self.rewards + (1. - self.terminals1) * tf.pow(gamma, self.nstep_steps) * Q_obs1
+
+        self.importance_weights = tf.placeholder(tf.float32, shape=(None, 1), name='importance_weights')
+
+
+
+        # pretrain stuff
+        action_diffs = self.action_diffs = tf.reduce_mean(tf.square(self.actions - self.actor_tf), 1)  # reduce mean of the actions so that we get shape (None, 1)
+
+        margin_limit = 0.01 # original = 0.1
+        tolerance = 0.01  # original = 0.001
+
+        self.margin_func = self.pretraining_tf * (margin_limit * tf.square(action_diffs)) / (tf.square(action_diffs) + tolerance)
+
+        self.max_margin_func = self.pretraining_tf * tf.maximum(self.normalized_critic_with_actor_tf + self.margin_func - self.critic_tf, 0)
+
+        # This scales the loss relative to the number of demonstrations
+        self.pretrain_loss = self.lambda_pretrain * (tf.reduce_sum(self.max_margin_func) / (tf.reduce_sum(self.pretraining_tf) + 1e-6))
+        # end pretrain stuff
+
+=======
         self.target_Q = self.rewards + (1. - self.terminals1) * gamma * Q_obs1
         self.importance_weights = tf.placeholder(tf.float32, shape=(None, 1), name='importance_weights')
 
+>>>>>>> master
 
         # Set up parts.
         if self.param_noise is not None:
@@ -184,6 +226,7 @@ class DDPG(object):
             self.setup_popart()
         self.setup_stats()
         self.setup_target_network_updates()
+        self.setup_summaries()
 
     def setup_target_network_updates(self):
         actor_init_updates, actor_soft_updates = get_target_updates(self.actor.vars, self.target_actor.vars, self.tau)
@@ -210,7 +253,16 @@ class DDPG(object):
 
     def setup_actor_optimizer(self):
         logger.info('setting up actor optimizer')
+
+        demo_better_than_critic = self.critic_tf < self.critic_with_actor_tf
+        demo_better_than_critic = self.pretraining_tf * tf.cast(demo_better_than_critic, tf.float32)
+
+        # self.actor_loss = -tf.reduce_mean(self.critic_with_actor_tf) + (tf.reduce_sum(demo_better_than_critic * self.action_diffs) / (tf.reduce_sum(self.pretraining_tf) + 1e-6))
         self.actor_loss = -tf.reduce_mean(self.critic_with_actor_tf)
+
+        self.number_of_demos_better = tf.reduce_sum(demo_better_than_critic)
+
+
         actor_shapes = [var.get_shape().as_list() for var in self.actor.trainable_vars]
         actor_nb_params = sum([reduce(lambda x, y: x * y, shape) for shape in actor_shapes])
         logger.info('  actor shapes: {}'.format(actor_shapes))
@@ -223,9 +275,25 @@ class DDPG(object):
         logger.info('setting up critic optimizer')
 
         normalized_critic_target_tf = tf.clip_by_value(normalize(self.critic_target, self.ret_rms), self.return_range[0], self.return_range[1])
+<<<<<<< pretraining-without-actor-loss
+
+        normalized_nstep_critic_target_tf = tf.clip_by_value(normalize(self.nstep_critic_target, self.ret_rms), self.return_range[0], self.return_range[1])
+
+        td_error = tf.square(self.normalized_critic_tf - normalized_critic_target_tf)
+        self.step_1_td_loss = tf.reduce_mean(self.importance_weights * td_error) * self.lambda_1step
+
+        nstep_td_error = tf.square(self.normalized_critic_tf - normalized_nstep_critic_target_tf)
+        self.n_step_td_loss = tf.reduce_mean(self.importance_weights * nstep_td_error) * self.lambda_nstep
+
+        self.td_error = td_error + nstep_td_error
+        #self.td_error = td_error
+        self.critic_loss = self.step_1_td_loss + self.n_step_td_loss + self.pretrain_loss
+
+=======
         self.td_error = tf.square(self.normalized_critic_tf - normalized_critic_target_tf)
         td_loss = tf.reduce_mean(self.importance_weights * self.td_error)
         self.critic_loss = tf.reduce_mean(td_loss)
+>>>>>>> master
         if self.critic_l2_reg > 0.:
             critic_reg_vars = [var for var in self.critic.trainable_vars if 'kernel' in var.name and 'output' not in var.name]
             for var in critic_reg_vars:
@@ -261,6 +329,38 @@ class DDPG(object):
             assert b.get_shape()[-1] == 1
             self.renormalize_Q_outputs_op += [M.assign(M * self.old_std / new_std)]
             self.renormalize_Q_outputs_op += [b.assign((b * self.old_std + self.old_mean - new_mean) / new_std)]
+
+
+
+    def setup_summaries(self):
+        tf.summary.scalar("actor_loss", self.actor_loss)
+        tf.summary.scalar("critic_loss", self.critic_loss)
+        tf.summary.scalar("1step_loss", self.step_1_td_loss)
+        tf.summary.scalar("nstep_loss", self.n_step_td_loss)
+
+        tf.summary.scalar("percentage_of_demonstrations", tf.reduce_sum(self.pretraining_tf) / self.batch_size)
+        tf.summary.scalar("margin_func_mean", tf.reduce_mean(self.margin_func))
+        tf.summary.scalar("number_of_demos_better_than_actor", self.number_of_demos_better)
+        tf.summary.histogram("margin_func", self.margin_func)
+        tf.summary.histogram("pretrain_samples", self.pretraining_tf)
+        tf.summary.histogram("margin_func_max", self.max_margin_func)
+
+        self.scalar_summaries = tf.summary.merge_all()
+        # reward
+        self.r_plot_in = tf.placeholder(tf.float32, name='r_plot_in')
+        self.r_plot = tf.summary.scalar("returns", self.r_plot_in)
+        self.r_plot_in_eval = tf.placeholder(tf.float32, name='r_plot_in_eval')
+        self.r_plot_eval = tf.summary.scalar("returns_eval", self.r_plot_in_eval)
+        self.writer = tf.summary.FileWriter(home + '/fyp_summaries/'+ self.run_name, graph=tf.get_default_graph())
+
+
+    def save_reward(self, r, ep):
+        summary = self.sess.run(self.r_plot, feed_dict={self.r_plot_in: r})
+        self.writer.add_summary(summary, ep)
+
+    def save_eval_reward(self, r, ep):
+        summary = self.sess.run(self.r_plot_eval, feed_dict={self.r_plot_in_eval: r})
+        self.writer.add_summary(summary, ep)
 
     def setup_stats(self):
         ops = []
@@ -335,10 +435,15 @@ class DDPG(object):
         if self.normalize_aux:
             self.aux_rms.update(np.array([aux0]))
 
-    def train(self):
+    def train(self, iteration, pretrain=False):
         # Get a batch.
+<<<<<<< pretraining-without-actor-loss
+        batch, nstep_batch, percentage = self.memory.sample_rollout(batch_size=self.batch_size, nsteps=self.nsteps, beta=self.beta, gamma=self.gamma, pretrain=pretrain)
+=======
         batch = self.memory.sample(batch_size=self.batch_size, beta=0.4)
+>>>>>>> master
         if self.normalize_returns and self.enable_popart:
+            raise Exception("Not implemented")
             old_mean, old_std, target_Q = self.sess.run([self.ret_rms.mean, self.ret_rms.std, self.target_Q], feed_dict={
                 self.obs1: batch['obs1'],
                 self.state1: batch['states1'],
@@ -363,30 +468,54 @@ class DDPG(object):
             # print(target_Q_new, target_Q, new_mean, new_std)
             # assert (np.abs(target_Q - target_Q_new) < 1e-3).all()
         else:
-            target_Q = self.sess.run(self.target_Q, feed_dict={
+            target_Q_1step = self.sess.run(self.target_Q, feed_dict={
                 self.obs1: batch['obs1'],
                 self.state1: batch['states1'],
                 self.aux1: batch['aux1'],
                 self.goal: batch['goals'],
                 self.rewards: batch['rewards'],
                 self.terminals1: batch['terminals1'].astype('float32'),
+                self.nstep_steps: np.ones((self.batch_size, 1)),
+            })
+
+            target_Q_nstep = self.sess.run(self.target_Q, feed_dict={
+                self.obs1: batch['obs1'],
+                self.state1: batch['states1'],
+                self.aux1: batch['aux1'],
+                self.goal: batch['goals'],
+                self.rewards: batch['rewards'],
+                self.nstep_steps: nstep_batch['step_reached'],
+                self.terminals1: batch['terminals1'].astype('float32'),
             })
 
         # Get all gradients and perform a synced update.
+<<<<<<< pretraining-without-actor-loss
+
+        ops = [self.actor_grads, self.actor_loss, self.critic_grads, self.critic_loss, self.td_error, self.scalar_summaries, self.pretrain_loss]
+        actor_grads, actor_loss, critic_grads, critic_loss, td_errors, scalar_summaries, pretrain_loss = self.sess.run(ops, feed_dict={
+=======
         ops = [self.actor_grads, self.actor_loss, self.critic_grads, self.critic_loss, self.td_error]
         actor_grads, actor_loss, critic_grads, critic_loss, td_errors = self.sess.run(ops, feed_dict={
+>>>>>>> master
             self.obs0: batch['obs0'],
+            self.importance_weights: batch['weights'],
             self.state0: batch['states0'],
             self.aux0: batch['aux0'],
             self.goal: batch['goals'],
             self.actions: batch['actions'],
+<<<<<<< pretraining-without-actor-loss
+            self.critic_target: target_Q_1step,
+            self.nstep_critic_target: target_Q_nstep,
+            self.pretraining_tf: batch['demos'].astype('float32'),
+=======
             self.critic_target: target_Q,
+>>>>>>> master
             self.importance_weights: batch['weights'],
         })
         self.memory.update_priorities(batch['idxes'], td_errors)
         self.actor_optimizer.update(actor_grads, stepsize=self.actor_lr)
         self.critic_optimizer.update(critic_grads, stepsize=self.critic_lr)
-
+        self.writer.add_summary(scalar_summaries, iteration)
         return critic_loss, actor_loss
 
     def set_sess(self, sess):
@@ -453,3 +582,50 @@ class DDPG(object):
             self.sess.run(self.perturb_policy_ops, feed_dict={
                 self.param_noise_stddev: self.param_noise.current_stddev,
             })
+
+
+
+
+    def write_summary(self, summary):
+        agent_summary = {
+            "gamma" : self.gamma,
+            "tau" : self.tau,
+            "normalize_observations" : self.normalize_observations,
+            "normalize_returns" : self.normalize_returns,
+            "normalize_state" : self.normalize_state,
+            "normalize_aux" : self.normalize_aux,
+            "action_noise" : self.action_noise,
+            "param_noise" : self.param_noise,
+            "action_range" : self.action_range,
+            "return_range" : self.return_range,
+            "observation_range" : self.observation_range,
+            "actor_lr" : self.actor_lr,
+            "state_range" : self.state_range,
+            "critic_lr" : self.critic_lr,
+            "clip_norm" : self.clip_norm,
+            "enable_popart" : self.enable_popart,
+            "reward_scale" : self.reward_scale,
+            "batch_size" : self.batch_size,
+            "critic_l2_reg" : self.critic_l2_reg,
+            "lambda_nstep" : self.lambda_nstep,
+            "lambda_1step" : self.lambda_1step,
+            "nsteps" : self.nsteps,
+            "beta" : self.beta,
+            "run_name" : self.run_name,
+            "lambda_pretrain" : self.lambda_pretrain,
+        }
+        summary["agent_summary"] = agent_summary
+        md_string = self._markdownize_summary(summary)
+        summary_op = tf.summary.text("param_info", tf.convert_to_tensor(md_string))
+        text = self.sess.run(summary_op)
+        self.writer.add_summary(text)
+        self.writer.flush()
+        print(md_string)
+
+    def _markdownize_summary(self, data):
+        result = []
+        for section, params in data.items():
+            result.append("### " + section)
+            for param, value in params.items():
+                result.append("* {} : {}".format(str(param), str(value)))
+        return "\n".join(result)
