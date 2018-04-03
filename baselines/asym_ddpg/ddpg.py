@@ -190,7 +190,6 @@ class DDPG(object):
         self.normalized_critic_with_actor_tf = critic(normalized_state0, normalized_goal, self.actor_tf, normalized_aux0, reuse=True)
         self.critic_with_actor_tf = denormalize(tf.clip_by_value(self.normalized_critic_with_actor_tf, self.return_range[0], self.return_range[1]), self.ret_rms)
         Q_obs1 = denormalize(target_critic(normalized_state1, normalized_goal, target_actor(normalized_obs1, normalized_aux1), normalized_aux1), self.ret_rms)
-<<<<<<< pretraining-without-actor-loss
         self.target_Q = self.rewards + (1. - self.terminals1) * tf.pow(gamma, self.nstep_steps) * Q_obs1
 
         self.importance_weights = tf.placeholder(tf.float32, shape=(None, 1), name='importance_weights')
@@ -210,13 +209,6 @@ class DDPG(object):
         # This scales the loss relative to the number of demonstrations
         self.pretrain_loss = self.lambda_pretrain * (tf.reduce_sum(self.max_margin_func) / (tf.reduce_sum(self.pretraining_tf) + 1e-6))
         # end pretrain stuff
-
-=======
-        self.target_Q = self.rewards + (1. - self.terminals1) * gamma * Q_obs1
-        self.importance_weights = tf.placeholder(tf.float32, shape=(None, 1), name='importance_weights')
-
->>>>>>> master
-
         # Set up parts.
         if self.param_noise is not None:
             self.setup_param_noise(normalized_obs0, normalized_aux0)
@@ -275,7 +267,6 @@ class DDPG(object):
         logger.info('setting up critic optimizer')
 
         normalized_critic_target_tf = tf.clip_by_value(normalize(self.critic_target, self.ret_rms), self.return_range[0], self.return_range[1])
-<<<<<<< pretraining-without-actor-loss
 
         normalized_nstep_critic_target_tf = tf.clip_by_value(normalize(self.nstep_critic_target, self.ret_rms), self.return_range[0], self.return_range[1])
 
@@ -289,11 +280,6 @@ class DDPG(object):
         #self.td_error = td_error
         self.critic_loss = self.step_1_td_loss + self.n_step_td_loss + self.pretrain_loss
 
-=======
-        self.td_error = tf.square(self.normalized_critic_tf - normalized_critic_target_tf)
-        td_loss = tf.reduce_mean(self.importance_weights * self.td_error)
-        self.critic_loss = tf.reduce_mean(td_loss)
->>>>>>> master
         if self.critic_l2_reg > 0.:
             critic_reg_vars = [var for var in self.critic.trainable_vars if 'kernel' in var.name and 'output' not in var.name]
             for var in critic_reg_vars:
@@ -437,11 +423,7 @@ class DDPG(object):
 
     def train(self, iteration, pretrain=False):
         # Get a batch.
-<<<<<<< pretraining-without-actor-loss
         batch, nstep_batch, percentage = self.memory.sample_rollout(batch_size=self.batch_size, nsteps=self.nsteps, beta=self.beta, gamma=self.gamma, pretrain=pretrain)
-=======
-        batch = self.memory.sample(batch_size=self.batch_size, beta=0.4)
->>>>>>> master
         if self.normalize_returns and self.enable_popart:
             raise Exception("Not implemented")
             old_mean, old_std, target_Q = self.sess.run([self.ret_rms.mean, self.ret_rms.std, self.target_Q], feed_dict={
@@ -489,27 +471,17 @@ class DDPG(object):
             })
 
         # Get all gradients and perform a synced update.
-<<<<<<< pretraining-without-actor-loss
-
         ops = [self.actor_grads, self.actor_loss, self.critic_grads, self.critic_loss, self.td_error, self.scalar_summaries, self.pretrain_loss]
         actor_grads, actor_loss, critic_grads, critic_loss, td_errors, scalar_summaries, pretrain_loss = self.sess.run(ops, feed_dict={
-=======
-        ops = [self.actor_grads, self.actor_loss, self.critic_grads, self.critic_loss, self.td_error]
-        actor_grads, actor_loss, critic_grads, critic_loss, td_errors = self.sess.run(ops, feed_dict={
->>>>>>> master
             self.obs0: batch['obs0'],
             self.importance_weights: batch['weights'],
             self.state0: batch['states0'],
             self.aux0: batch['aux0'],
             self.goal: batch['goals'],
             self.actions: batch['actions'],
-<<<<<<< pretraining-without-actor-loss
             self.critic_target: target_Q_1step,
             self.nstep_critic_target: target_Q_nstep,
             self.pretraining_tf: batch['demos'].astype('float32'),
-=======
-            self.critic_target: target_Q,
->>>>>>> master
             self.importance_weights: batch['weights'],
         })
         self.memory.update_priorities(batch['idxes'], td_errors)
