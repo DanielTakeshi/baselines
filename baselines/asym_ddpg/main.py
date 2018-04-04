@@ -101,6 +101,7 @@ def parse_args():
 
     parser.add_argument('--env-id', type=str, default='MicoEnv-pusher-dense-pixels-v1')
     boolean_flag(parser, 'render-eval', default=True)
+    boolean_flag(parser, 'render-demo', default=True)
     boolean_flag(parser, 'layer-norm', default=True)
     boolean_flag(parser, 'render', default=False)
     boolean_flag(parser, 'normalize-returns', default=False)

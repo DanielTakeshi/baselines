@@ -19,7 +19,7 @@ home = str(Path.home())
 def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, param_noise, actor, critic,
     normalize_returns, normalize_observations, normalize_aux, critic_l2_reg, actor_lr, critic_lr, action_noise,
     popart, gamma, clip_norm, nb_train_steps, nb_rollout_steps, nb_eval_steps, batch_size, memory, load_from_file,
-    run_name, lambda_pretrain, lambda_1step, lambda_nstep, replay_beta, tau=0.01, eval_env=None, demo_policy=None, num_demo_steps=0, demo_env=None, param_noise_adaption_interval=50, num_pretrain_steps=0):
+    run_name, lambda_pretrain, lambda_1step, lambda_nstep, replay_beta, tau=0.01, eval_env=None, demo_policy=None, num_demo_steps=0, demo_env=None, param_noise_adaption_interval=50, render_demo=False, num_pretrain_steps=0):
     rank = MPI.COMM_WORLD.Get_rank()
 
     assert (np.abs(env.action_space.low) == env.action_space.high).all()  # we assume symmetric actions.
@@ -102,7 +102,7 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                 return
 
         if demo_policy:
-            _initialize_memory_with_policy(agent, demo_policy, demo_env, num_demo_steps)
+            _initialize_memory_with_policy(agent, demo_policy, demo_env,render_demo, num_demo_steps, run_name)
 
         agent.reset()
         obs = env.reset()
@@ -222,7 +222,7 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                 if eval_env is not None and cycle == 0:
                     eval_episode_reward = 0.
                     if render_eval:
-                        fname= home + '/ddpg/eval-{}-{}.avi'.format(run_name, epoch + 1)
+                        fname= home + '/ddpg_video_buffer/eval-{}-{}.avi'.format(run_name, epoch + 1)
                         fourcc = cv2.VideoWriter_fourcc(*"XVID")
                         rgb = cv2.VideoWriter(fname, fourcc, 30.0, (84, 84))
                     for t_rollout in range(nb_eval_steps):
@@ -308,7 +308,7 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
             print("Model saved")
 
 
-def _initialize_memory_with_policy(agent, demo_policy, demo_env, num_demo_steps):
+def _initialize_memory_with_policy(agent, demo_policy, demo_env,render_demo, num_demo_steps, run_name):
     print("Start collecting demo transitions")
     obs0 = demo_env.reset()
     demo_policy.reset()
