@@ -13,6 +13,9 @@ from mpi4py import MPI
 import cv2
 from drive_util import uploadToDrive
 PATH = "/tmp/model.ckpt"
+
+from pathlib import Path
+home = str(Path.home())
 def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, param_noise, actor, critic,
     normalize_returns, normalize_observations, normalize_aux, critic_l2_reg, actor_lr, critic_lr, action_noise,
     popart, gamma, clip_norm, nb_train_steps, nb_rollout_steps, nb_eval_steps, batch_size, memory, load_from_file,
@@ -219,7 +222,7 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                 if eval_env is not None and cycle == 0:
                     eval_episode_reward = 0.
                     if render_eval:
-                        fname= '/tmp/jm6214/ddpg/eval-{}-{}.avi'.format(run_name, epoch + 1)
+                        fname= home + '/ddpg/eval-{}-{}.avi'.format(run_name, epoch + 1)
                         fourcc = cv2.VideoWriter_fourcc(*"XVID")
                         rgb = cv2.VideoWriter(fname, fourcc, 30.0, (84, 84))
                     for t_rollout in range(nb_eval_steps):
@@ -311,6 +314,11 @@ def _initialize_memory_with_policy(agent, demo_policy, demo_env, num_demo_steps)
     demo_policy.reset()
     goal = demo_env.goalstate()
     goal_obs = demo_env.goalobs()
+
+    if render_demo:
+        fname= home + '/ddpg_video_buffer/demo-{}.avi'.format(run_name)
+        fourcc = cv2.VideoWriter_fourcc(*"XVID")
+        rgb = cv2.VideoWriter(fname, fourcc, 30.0, (84, 84))
     for i in range(num_demo_steps):
         aux0 = demo_env.get_aux()
         state0 = demo_env.get_state()
@@ -320,9 +328,18 @@ def _initialize_memory_with_policy(agent, demo_policy, demo_env, num_demo_steps)
         state1 = demo_env.get_state()
         agent.store_transition(state0, obs0, action, r, state1, obs1, done, goal, goal_obs, aux0, aux1, demo=True)
         obs0 = obs1
+        if render_demo:
+            frame = np.array(obs0[:,:,0:3].copy()*255, dtype=np.uint8)
+            cv2.putText(frame,format(r, '.2f'), (40,15), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255,0,0), 1)
+            rgb.write(frame)
         if done:
             obs0 = demo_env.reset()
             demo_policy.reset()
             goal = demo_env.goalstate()
             goal_obs = demo_env.goalobs()
+    if render_demo:
+        rgb.release()
+        uploadToDrive(run_name, "demo.avi", fname, delete=True)
+        print("Uploaded demo to drive.")
+
     print("Collected {} demo transition.".format(agent.memory._num_demonstrations))
