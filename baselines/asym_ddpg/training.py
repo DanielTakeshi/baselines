@@ -291,6 +291,7 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
             # Total statistics.
             combined_stats['total/epochs'] = epoch + 1
             combined_stats['total/steps'] = t
+            combined_stats['curr_run_name'] = run_name
 
             for key in sorted(combined_stats.keys()):
                 logger.record_tabular(key, combined_stats[key])

@@ -193,22 +193,7 @@ class DDPG(object):
         self.target_Q = self.rewards + (1. - self.terminals1) * tf.pow(gamma, self.nstep_steps) * Q_obs1
 
         self.importance_weights = tf.placeholder(tf.float32, shape=(None, 1), name='importance_weights')
-
-
-
-        # pretrain stuff
-        action_diffs = self.action_diffs = tf.reduce_mean(tf.square(self.actions - self.actor_tf), 1)  # reduce mean of the actions so that we get shape (None, 1)
-
-        margin_limit = 0.01 # original = 0.1
-        tolerance = 0.01  # original = 0.001
-
-        self.margin_func = self.pretraining_tf * (margin_limit * tf.square(action_diffs)) / (tf.square(action_diffs) + tolerance)
-
-        self.max_margin_func = self.pretraining_tf * tf.maximum(self.normalized_critic_with_actor_tf + self.margin_func - self.critic_tf, 0)
-
-        # This scales the loss relative to the number of demonstrations
-        self.pretrain_loss = self.lambda_pretrain * (tf.reduce_sum(self.max_margin_func) / (tf.reduce_sum(self.pretraining_tf) + 1e-6))
-        # end pretrain stuff
+        self.action_diffs = tf.reduce_mean(tf.square(self.actions - self.actor_tf), 1)
         # Set up parts.
         if self.param_noise is not None:
             self.setup_param_noise(normalized_obs0, normalized_aux0)
@@ -248,9 +233,11 @@ class DDPG(object):
 
         demo_better_than_critic = self.critic_tf < self.critic_with_actor_tf
         demo_better_than_critic = self.pretraining_tf * tf.cast(demo_better_than_critic, tf.float32)
+        self.bc_loss = (tf.reduce_sum(demo_better_than_critic * self.action_diffs) * self.lambda_pretrain / (tf.reduce_sum(self.pretraining_tf) + 1e-6))
+        self.original_actor_loss = -tf.reduce_mean(self.critic_with_actor_tf)
+        self.actor_loss = self.original_actor_loss + self.bc_loss
 
-        # self.actor_loss = -tf.reduce_mean(self.critic_with_actor_tf) + (tf.reduce_sum(demo_better_than_critic * self.action_diffs) / (tf.reduce_sum(self.pretraining_tf) + 1e-6))
-        self.actor_loss = -tf.reduce_mean(self.critic_with_actor_tf)
+        # self.actor_loss = -tf.reduce_mean(self.critic_with_actor_tf)
 
         self.number_of_demos_better = tf.reduce_sum(demo_better_than_critic)
 
@@ -278,7 +265,7 @@ class DDPG(object):
 
         self.td_error = td_error + nstep_td_error
         #self.td_error = td_error
-        self.critic_loss = self.step_1_td_loss + self.n_step_td_loss + self.pretrain_loss
+        self.critic_loss = self.step_1_td_loss + self.n_step_td_loss
 
         if self.critic_l2_reg > 0.:
             critic_reg_vars = [var for var in self.critic.trainable_vars if 'kernel' in var.name and 'output' not in var.name]
@@ -325,11 +312,10 @@ class DDPG(object):
         tf.summary.scalar("nstep_loss", self.n_step_td_loss)
 
         tf.summary.scalar("percentage_of_demonstrations", tf.reduce_sum(self.pretraining_tf) / self.batch_size)
-        tf.summary.scalar("margin_func_mean", tf.reduce_mean(self.margin_func))
         tf.summary.scalar("number_of_demos_better_than_actor", self.number_of_demos_better)
-        tf.summary.histogram("margin_func", self.margin_func)
         tf.summary.histogram("pretrain_samples", self.pretraining_tf)
-        tf.summary.histogram("margin_func_max", self.max_margin_func)
+        tf.summary.scalar("bc_loss", self.bc_loss)
+        tf.summary.scalar("original_actor_loss", self.original_actor_loss)
 
         self.scalar_summaries = tf.summary.merge_all()
         # reward
@@ -471,8 +457,8 @@ class DDPG(object):
             })
 
         # Get all gradients and perform a synced update.
-        ops = [self.actor_grads, self.actor_loss, self.critic_grads, self.critic_loss, self.td_error, self.scalar_summaries, self.pretrain_loss]
-        actor_grads, actor_loss, critic_grads, critic_loss, td_errors, scalar_summaries, pretrain_loss = self.sess.run(ops, feed_dict={
+        ops = [self.actor_grads, self.actor_loss, self.critic_grads, self.critic_loss, self.td_error, self.scalar_summaries]
+        actor_grads, actor_loss, critic_grads, critic_loss, td_errors, scalar_summaries = self.sess.run(ops, feed_dict={
             self.obs0: batch['obs0'],
             self.importance_weights: batch['weights'],
             self.state0: batch['states0'],
