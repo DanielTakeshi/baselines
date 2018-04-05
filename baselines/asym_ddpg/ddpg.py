@@ -67,7 +67,7 @@ def get_perturbed_actor_updates(actor, perturbed_actor, param_noise_stddev):
 class DDPG(object):
     def __init__(self, actor, critic, memory, observation_shape, action_shape, state_shape, aux_shape, param_noise=None, action_noise=None,
         gamma=0.99, tau=0.001, normalize_returns=False, enable_popart=False, normalize_observations=True, normalize_state=True, normalize_aux=True,
-        batch_size=128, observation_range=(0., 1.), action_range=(-1., 1.), state_range=(-4, 4), return_range=(-np.inf, np.inf), aux_range=(-10, 10),
+        batch_size=128, observation_range=(-10., 10.), action_range=(-1., 1.), state_range=(-4, 4), return_range=(-np.inf, np.inf), aux_range=(-10, 10),
         adaptive_param_noise=True, adaptive_param_noise_policy_threshold=.1,
         critic_l2_reg=0.001, actor_lr=1e-4, critic_lr=1e-3, clip_norm=None, reward_scale=1., replay_beta=0.4,lambda_1step=1.0, lambda_nstep=1.0, nsteps=10, run_name="unnamed_run", lambda_pretrain=0.0):
 
@@ -306,7 +306,7 @@ class DDPG(object):
         self.r_plot = tf.summary.scalar("returns", self.r_plot_in)
         self.r_plot_in_eval = tf.placeholder(tf.float32, name='r_plot_in_eval')
         self.r_plot_eval = tf.summary.scalar("returns_eval", self.r_plot_in_eval)
-        self.writer = tf.summary.FileWriter(home + '/fyp_summaries/'+ self.run_name, graph=tf.get_default_graph())
+        self.writer = tf.summary.FileWriter(home + '/fyp_summaries/low_dim/'+ self.run_name, graph=tf.get_default_graph())
 
 
     def save_reward(self, r, ep):
