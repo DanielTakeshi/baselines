@@ -155,7 +155,6 @@ class PrioritizedMemory(Memory):
                     terminal = 1.0
                     break
             n_step_batches["obs0"].append(transitions["obs0"][0])
-            n_step_batches["obs0"].append(transitions["obs0"][0])
             n_step_batches["step_reached"].append(count)
             n_step_batches["obs1"].append(transitions["obs1"][count])
             n_step_batches["terminals1"].append(terminal)
