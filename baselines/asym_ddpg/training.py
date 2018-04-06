@@ -332,7 +332,7 @@ def _initialize_memory_with_policy(agent, demo_policy, demo_env,render_demo, num
         agent.store_transition(state0, obs0, action, r, state1, obs1, done, goal, goal_obs, aux0, aux1, demo=True)
         obs0 = obs1
         if render_demo:
-            frame = env.render(mode="rgb_array")
+            frame = demo_env.render(mode="rgb_array")
             frame = np.array(frame[:,:,0:3].copy()*255, dtype=np.uint8)
             cv2.putText(frame,format(r, '.2f'), (40,15), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255,0,0), 1)
             rgb.write(frame)
