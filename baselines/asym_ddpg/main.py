@@ -30,7 +30,7 @@ def run(env_id, seed, noise_type, layer_norm, evaluation,demo_policy, **kwargs):
         print ("wrapping env")
         env = gym.wrappers.FlattenDictWrapper(
             env, dict_keys=['observation', 'desired_goal'])
-    env = bench.Monitor(env, logger.get_dir() and os.path.join(logger.get_dir(), str(rank)))
+    # env = bench.Monitor(env, logger.get_dir() and os.path.join(logger.get_dir(), str(rank)))
 
     if evaluation and rank==0:
         eval_env = gym.make(env_id)
@@ -38,7 +38,7 @@ def run(env_id, seed, noise_type, layer_norm, evaluation,demo_policy, **kwargs):
             print ("wrapping env")
             eval_env = gym.wrappers.FlattenDictWrapper(
                 eval_env, dict_keys=['observation', 'desired_goal'])
-        eval_env = bench.Monitor(eval_env, os.path.join(logger.get_dir(), 'gym_eval'))
+        # eval_env = bench.Monitor(eval_env, os.path.join(logger.get_dir(), 'gym_eval'))
     else:
         eval_env = None
 
@@ -99,7 +99,7 @@ def run(env_id, seed, noise_type, layer_norm, evaluation,demo_policy, **kwargs):
 def parse_args():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-    parser.add_argument('--env-id', type=str, default='MicoEnv-pusher-dense-pixels-v1')
+    parser.add_argument('--env-id', type=str, default='MicoEnv-grabber-dense-v1')
     boolean_flag(parser, 'render-eval', default=True)
     boolean_flag(parser, 'render-demo', default=True)
     boolean_flag(parser, 'layer-norm', default=True)
