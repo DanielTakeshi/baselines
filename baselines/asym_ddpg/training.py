@@ -13,8 +13,10 @@ from mpi4py import MPI
 import cv2
 from drive_util import uploadToDrive
 PATH = "/tmp/model.ckpt"
-
 from pathlib import Path
+demo_states_dir = "/tmp/jm6214/demo_states"
+demo_states_template = demo_states_dir+ "/{}/{}.bullet"
+
 home = str(Path.home())
 def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, param_noise, actor, critic,
     normalize_returns, normalize_observations, normalize_aux, critic_l2_reg, actor_lr, critic_lr, action_noise,
@@ -196,10 +198,20 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                         episodes += 1
 
                         agent.reset()
-                        obs = env.reset()
+                        if np.random.uniform(0, 1) < 0.2:
+                            demo_index = np.random.randint(0, num_demo_steps)
+                            state = memory._storage[demo_index][0]
+
+                            fn = demo_states_template.format(run_name, demo_index)
+                            env.reset_to_state(state, fn=fn)
+                            print ("reseted_to_demo")
+                        else:
+                            obs = env.reset()
+
 
                         goal = env.goalstate()
                         goal_obs = env.goalobs()
+
 
                 # Train.
                 epoch_actor_losses = []
@@ -313,10 +325,12 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
 
 def _initialize_memory_with_policy(agent, demo_policy, demo_env,render_demo, num_demo_steps, run_name):
     print("Start collecting demo transitions")
+     
     obs0 = demo_env.reset()
     demo_policy.reset()
     goal = demo_env.goalstate()
     goal_obs = demo_env.goalobs()
+    os.makedirs(demo_states_dir+"/"+run_name, exist_ok=True)
 
     if render_demo:
         fname= home + '/ddpg_video_buffer/demo-{}.avi'.format(run_name)
@@ -326,10 +340,14 @@ def _initialize_memory_with_policy(agent, demo_policy, demo_env,render_demo, num
         aux0 = demo_env.get_aux()
         state0 = demo_env.get_state()
         action = demo_policy.choose_action(state0)
+        fn = demo_states_template.format(run_name, i)
+        print(fn)
+        demo_env.store_state(fn)
         obs1, r, done, info = demo_env.step(action)
         aux1 = demo_env.get_aux()
         state1 = demo_env.get_state()
         agent.store_transition(state0, obs0, action, r, state1, obs1, done, goal, goal_obs, aux0, aux1, demo=True)
+
         obs0 = obs1
         if render_demo:
             frame = demo_env.render(mode="rgb_array")
