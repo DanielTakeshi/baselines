@@ -50,12 +50,14 @@ def huber_loss(x, delta=1.0):
 
 def make_session(num_cpu=None, make_default=False):
     """Returns a session that will use <num_cpu> CPU's only"""
+                
     if num_cpu is None:
         num_cpu = int(os.getenv('RCALL_NUM_CPU', multiprocessing.cpu_count()))
     tf_config = tf.ConfigProto(
         inter_op_parallelism_threads=num_cpu,
         intra_op_parallelism_threads=num_cpu)
     tf_config.gpu_options.allocator_type = 'BFC'
+    tf_config.gpu_options.allow_growth=True
     if make_default:
         return tf.InteractiveSession(config=tf_config)
     else:
