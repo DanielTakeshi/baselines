@@ -21,8 +21,10 @@ home = str(Path.home())
 def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, param_noise, actor, critic,
     normalize_returns, normalize_observations, normalize_aux, critic_l2_reg, actor_lr, critic_lr, action_noise,
     popart, gamma, clip_norm, nb_train_steps, nb_rollout_steps, nb_eval_steps, batch_size, memory, load_from_file,
-    run_name, lambda_pretrain, lambda_1step, lambda_nstep, replay_beta, tau=0.01, eval_env=None, demo_policy=None, num_demo_steps=0, demo_env=None, param_noise_adaption_interval=50, render_demo=False, num_pretrain_steps=0):
+    run_name, lambda_pretrain, lambda_1step, lambda_nstep, replay_beta,reset_to_demo_rate, tau=0.01, eval_env=None, demo_policy=None, num_demo_steps=0, demo_env=None, param_noise_adaption_interval=50, render_demo=False, num_pretrain_steps=0):
     rank = MPI.COMM_WORLD.Get_rank()
+
+
 
     assert (np.abs(env.action_space.low) == env.action_space.high).all()  # we assume symmetric actions.
     max_action = env.action_space.high
@@ -198,13 +200,12 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                         episodes += 1
 
                         agent.reset()
-                        if np.random.uniform(0, 1) < 0.2:
+                        if np.random.uniform(0, 1) < reset_to_demo_rate:
                             demo_index = np.random.randint(0, num_demo_steps)
                             state = memory._storage[demo_index][0]
 
                             fn = demo_states_template.format(run_name, demo_index)
                             env.reset_to_state(state, fn=fn)
-                            print ("reseted_to_demo")
                         else:
                             obs = env.reset()
 
@@ -341,7 +342,6 @@ def _initialize_memory_with_policy(agent, demo_policy, demo_env,render_demo, num
         state0 = demo_env.get_state()
         action = demo_policy.choose_action(state0)
         fn = demo_states_template.format(run_name, i)
-        print(fn)
         demo_env.store_state(fn)
         obs1, r, done, info = demo_env.step(action)
         aux1 = demo_env.get_aux()
