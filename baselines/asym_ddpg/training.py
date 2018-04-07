@@ -127,7 +127,9 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
         epoch_actions = []
         epoch_qs = []
         epoch_episodes = 0
-
+        eval_episode_rewards = []
+        eval_qs = []
+        eval_episode_reward = 0.
 
 
 
@@ -230,10 +232,8 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                     agent.update_target_net()
 
                 # Evaluate.
-                eval_episode_rewards = []
-                eval_qs = []
+
                 if eval_env is not None and cycle == 0:
-                    eval_episode_reward = 0.
                     if render_eval:
                         fname= home + '/ddpg_video_buffer/eval-{}-{}.avi'.format(run_name, epoch + 1)
                         fourcc = cv2.VideoWriter_fourcc(*"XVID")
