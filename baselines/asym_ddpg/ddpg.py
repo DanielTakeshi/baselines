@@ -407,13 +407,13 @@ class DDPG(object):
         })
 
         target_Q_nstep = self.sess.run(self.target_Q, feed_dict={
-            self.obs1: batch['obs1'],
-            self.state1: batch['states1'],
-            self.aux1: batch['aux1'],
-            self.goal: batch['goals'],
-            self.rewards: batch['rewards'],
-            self.nstep_steps: nstep_batch['step_reached'],
-            self.terminals1: batch['terminals1'].astype('float32'),
+            self.obs1: n_step_batch['obs1'],
+            self.state1: n_step_batch['states1'],
+            self.aux1: n_step_batch['aux1'],
+            self.goal: n_step_batch['goals'],
+            self.rewards: n_step_batch['rewards'],
+            self.nstep_steps: n_step_batch['step_reached'],
+            self.terminals1: n_step_batch['terminals1'].astype('float32'),
         })
 
         # Get all gradients and perform a synced update.

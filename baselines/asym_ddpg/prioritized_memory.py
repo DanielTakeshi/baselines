@@ -154,18 +154,18 @@ class PrioritizedMemory(Memory):
                 if terminals[i]:
                     terminal = 1.0
                     break
-            n_step_batches["obs0"].append(transitions["obs0"])
+            # n_step_batches["obs0"].append(transitions["obs0"])
             n_step_batches["step_reached"].append(count)
             n_step_batches["obs1"].append(transitions["obs1"][count])
             n_step_batches["terminals1"].append(terminal)
             n_step_batches["rewards"].append(summed_reward)
-            n_step_batches["states0"].append(transitions["states0"])
+            # n_step_batches["states0"].append(transitions["states0"])
             n_step_batches["states1"].append(transitions["states1"][count])
-            n_step_batches["aux0"].append(transitions["aux0"])
+            # n_step_batches["aux0"].append(transitions["aux0"])
             n_step_batches["aux1"].append(transitions["aux1"][count])
-            n_step_batches["goals"].append(transitions["goals"])
-            n_step_batches["goal_observations"].append(transitions["goal_observations"])
-            n_step_batches["actions"].append(transitions["actions"])
+            n_step_batches["goals"].append(transitions["goals"][count])
+            # n_step_batches["goal_observations"].append(transitions["goal_observations"])
+            n_step_batches["actions"].append(transitions["actions"][0])
         n_step_batches['demos'] = batches['demos']
         n_step_batches = {k: array_min2d(v) for k, v in n_step_batches.items()}
         n_step_batches['weights'] = batches['weights']
