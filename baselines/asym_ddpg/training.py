@@ -203,9 +203,11 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
 
                         agent.reset()
                         if np.random.uniform(0, 1) < reset_to_demo_rate:
-                            demo_index = np.random.randint(0, num_demo_steps)
-                            state = memory._storage[demo_index][0]
-
+                            terminal_demo = True
+                            while (terminal_demo):
+                                demo_index = np.random.randint(0, num_demo_steps)
+                                state = memory._storage[demo_index][0]
+                                terminal_demo = memory._storage[demo_index][6]
                             fn = demo_states_template.format(run_name, demo_index)
                             env.reset_to_state(state, fn=fn)
                         else:

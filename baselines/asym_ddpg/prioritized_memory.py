@@ -122,16 +122,16 @@ class PrioritizedMemory(Memory):
         demos = [i < self._num_demonstrations for i in idxes]
         weights = []
         p_min = self._it_min.min() / self._it_sum.sum()
-        max_weight = (p_min * len(self._storage)) ** (-beta)
         for idx in idxes:
             p_sample = self._it_sum[idx] / self._it_sum.sum()
             weight = (p_sample * len(self._storage)) ** (-beta)
-            weights.append(weight / max_weight)
-        weights = np.array(weights)
+            weights.append(weight)
+        weights = np.array(weights) / np.max(weights)
         encoded_sample = self._get_batches_for_idxes(idxes)
         encoded_sample['weights'] = array_min2d(weights)
         encoded_sample['idxes'] = idxes
         encoded_sample['demos'] = array_min2d(demos)
+
         return encoded_sample
 
 
@@ -184,4 +184,4 @@ class PrioritizedMemory(Memory):
             assert 0 <= idx < len(self._storage)
             self._it_sum[idx] = priority ** self._alpha
             self._it_min[idx] = priority ** self._alpha
-        self._max_priority = max(self._max_priority, priority)
+            self._max_priority = max(self._max_priority, priority)
