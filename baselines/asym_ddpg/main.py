@@ -66,7 +66,7 @@ def run(env_id, seed, noise_type, layer_norm, evaluation,demo_policy, **kwargs):
 
     #TODO:
 
-    memory = PrioritizedMemory(limit=int(1e4), alpha=0.3)
+    memory = PrioritizedMemory(limit=int(1e6), alpha=0.8)
     critic = Critic(layer_norm=layer_norm)
     actor = Actor(nb_actions, layer_norm=layer_norm)
 
