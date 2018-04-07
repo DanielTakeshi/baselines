@@ -207,9 +207,10 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                             while (terminal_demo):
                                 demo_index = np.random.randint(0, num_demo_steps)
                                 state = memory._storage[demo_index][0]
-                                terminal_demo = memory._storage[demo_index][6]
+                                for di in range(demo_index, demo_index + 5):
+                                    terminal_demo = terminal_demo or memory._storage[di % num_demo_steps][6]
                             fn = demo_states_template.format(run_name, demo_index)
-                            env.reset_to_state(state, fn=fn)
+                            obs = env.reset_to_state(state, fn=fn)
                         else:
                             obs = env.reset()
 
