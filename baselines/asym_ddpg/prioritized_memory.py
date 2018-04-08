@@ -174,10 +174,11 @@ class PrioritizedMemory(Memory):
         return batches, n_step_batches, sum(batches['demos'])/batch_size
 
     def update_priorities(self, idxes, td_errors, actor_losses=0.0):
-        priorities = (td_errors ** 2) + (actor_losses ** 2) + self._transition_small_epsilon
+        priorities = td_errors + (actor_losses ** 2) + self._transition_small_epsilon
         for i in range(len(priorities)):
             if idxes[i] < self._num_demonstrations:
-                priorities[i] += self._demonstartion_epsilon
+                # priorities[i] += self._demonstartion_epsilon
+                priorities[i] += np.max(priorities)
         assert len(idxes) == len(priorities)
         for idx, priority in zip(idxes, priorities):
             assert priority > 0

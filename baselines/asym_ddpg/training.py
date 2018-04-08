@@ -72,18 +72,9 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
 
     with U.single_threaded_session() as sess:
         # Prepare everything.
-        agent.set_sess(sess)
-        if not load_from_file:
-            agent.initialize()
-            print("Model initialized")
-            save_path = saver.save(sess, PATH)
-            print("Model saved")
-        else:
-            saver.restore(sess, PATH)
-            print("Model restored")
-            only_eval = True
-        agent.sync_optimizers()
+        agent.initialize(sess)
         agent.write_summary(training_text_summary)
+        sess.graph.finalize()
         # sess.graph.finalize()
 
         if eval_env is not None:
