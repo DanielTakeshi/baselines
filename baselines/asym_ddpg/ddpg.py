@@ -355,16 +355,15 @@ class DDPG(object):
             self.stats_ops = ops
             self.stats_names = names
 
-    def pi(self, obs, aux, apply_noise=True, compute_Q=True):
+    def pi(self, obs, aux, goal, state0, apply_noise=True, compute_Q=True):
         if self.param_noise is not None and apply_noise:
             actor_tf = self.perturbed_actor_tf
         else:
             actor_tf = self.actor_tf
-        feed_dict = {self.obs0: [obs], self.aux0: [aux]}
+        feed_dict = {self.obs0: [obs], self.aux0: [aux], self.goal: [goal], self.state0:[ state0]}
         if compute_Q:
 
-            # action, q = self.sess.run([actor_tf, self.critic_with_actor_tf], feed_dict=feed_dict)
-            action, q = self.sess.run(actor_tf, feed_dict=feed_dict), 137.0
+            action, q = self.sess.run([actor_tf, self.critic_with_actor_tf], feed_dict=feed_dict)
 
         else:
             action = self.sess.run(actor_tf, feed_dict=feed_dict)
@@ -394,7 +393,7 @@ class DDPG(object):
 
     def train(self, iteration, pretrain=False):
         # Get a batch.
-        batch, nstep_batch, percentage = self.memory.sample_rollout(batch_size=self.batch_size, nsteps=self.nsteps, beta=self.beta, gamma=self.gamma, pretrain=pretrain)
+        batch, n_step_batch, percentage = self.memory.sample_rollout(batch_size=self.batch_size, nsteps=self.nsteps, beta=self.beta, gamma=self.gamma, pretrain=pretrain)
 
         target_Q_1step = self.sess.run(self.target_Q, feed_dict={
             self.obs1: batch['obs1'],

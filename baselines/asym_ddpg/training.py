@@ -98,7 +98,9 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                     total_r = 0
                     while not done:
                         aux0 = env.get_aux()
-                        action, q = agent.pi(obs, aux0, apply_noise=False, compute_Q=True)
+                        state = env.state()
+                        goal = env.goalstate()
+                        action, q = agent.pi(obs, aux0, goal, state, apply_noise=False, compute_Q=True)
                         obs, r, done, info = env.step(action)
                         env.render()
                         total_r += r
@@ -159,7 +161,9 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                 for t_rollout in range(nb_rollout_steps):
                     # Predict next action.
                     aux0 = env.get_aux()
-                    action, q = agent.pi(obs, aux0, apply_noise=True, compute_Q=True)
+                    state =  env.get_state()
+
+                    action, q = agent.pi(obs, aux0, goal, state, apply_noise=True, compute_Q=True)
                     assert action.shape == env.action_space.shape
 
                     # Execute next action.
@@ -167,7 +171,6 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                         print("a")
                         env.render()
                     assert max_action.shape == action.shape
-                    state =  env.get_state()
                     new_obs, r, done, info = env.step(max_action * action)  # scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
                     t += 1
                     if rank == 0 and render:
@@ -206,7 +209,7 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                             while (True):
                                 demo_index = np.random.randint(0, num_demo_steps)
                                 state = memory._storage[demo_index][0]
-                                terminal_demo = False 
+                                terminal_demo = False
                                 for di in range(demo_index, demo_index + 5):
                                     terminal_demo = terminal_demo or memory._storage[di % num_demo_steps][6]
                                 if not terminal_demo:
@@ -245,7 +248,8 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                         rgb = cv2.VideoWriter(fname, fourcc, 30.0, (84, 84))
                     for t_rollout in range(nb_eval_steps):
                         aux = eval_env.get_aux()
-                        eval_action, eval_q = agent.pi(eval_obs, aux, apply_noise=False, compute_Q=True)
+                        state = eval_env.get_state()
+                        eval_action, eval_q = agent.pi(eval_obs, aux, goal, state, apply_noise=False, compute_Q=True)
                         eval_obs, eval_r, eval_done, eval_info = eval_env.step(max_action * eval_action)  # scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
                         if render_eval:
                             frame = env.render(mode="rgb_array")
