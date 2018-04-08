@@ -159,15 +159,10 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
 
                     # Execute next action.
                     if rank == 0 and render:
-                        print("a")
                         env.render()
                     assert max_action.shape == action.shape
                     new_obs, r, done, info = env.step(max_action * action)  # scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
                     t += 1
-                    if rank == 0 and render:
-                        print("a")
-
-                        env.render()
                     episode_reward += r
                     episode_step += 1
 
@@ -201,7 +196,7 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                                 demo_index = np.random.randint(0, num_demo_steps)
                                 state = memory._storage[demo_index][0]
                                 terminal_demo = False
-                                for di in range(demo_index, demo_index + 5):
+                                for di in range(demo_index, demo_index + 1):
                                     terminal_demo = terminal_demo or memory._storage[di % num_demo_steps][6]
                                 if not terminal_demo:
                                     break
