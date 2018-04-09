@@ -4,7 +4,7 @@ from baselines import logger
 import baselines.common as common
 from baselines.common import tf_util as U
 from baselines.acktr import kfac
-from baselines.common.filters import ZFilter
+from baselines.acktr.filters import ZFilter
 
 def pathlength(path):
     return path["reward"].shape[0]# Loss function that we'll differentiate to get the policy gradient
@@ -50,7 +50,8 @@ def learn(env, policy, vf, gamma, lam, timesteps_per_batch, num_timesteps,
 
     obfilter = ZFilter(env.observation_space.shape)
 
-    max_pathlength = env.spec.timestep_limit
+    max_pathlength = env.doneAfter
+    assert max_pathlength and max_pathlength < 1000
     stepsize = tf.Variable(initial_value=np.float32(np.array(0.03)), name='stepsize')
     inputs, loss, loss_sampled = policy.update_info
     optim = kfac.KfacOptimizer(learning_rate=stepsize, cold_lr=stepsize*(1-0.9), momentum=0.9, kfac_update=2,\

@@ -133,6 +133,7 @@ def parse_args():
     parser.add_argument('--lambda-1step', type=float, default=1.0)
     parser.add_argument('--replay-beta', type=float, default=0.4)
     parser.add_argument('--reset-to-demo-rate', type=float, default=0.2)
+    parser.add_argument('--tau', type=float, default=0.01)
 
     boolean_flag(parser, 'evaluation', default=True)
 
