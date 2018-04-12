@@ -30,7 +30,13 @@ class Actor(Model):
             if reuse:
                 scope.reuse_variables()
 
-            x = tf.concat([obs, aux], axis=-1)
+            x = obs
+#            x = tc.layers.conv2d(x, 32, kernel_size=(3,3), stride=2, normalizer_fn=tc.layers.layer_norm)
+#            x = tc.layers.conv2d(x, 32, kernel_size=(3, 3), stride=2, normalizer_fn=tc.layers.layer_norm)
+#            x = tc.layers.conv2d(x, 32, kernel_size=(3, 3), stride=2, normalizer_fn=tc.layers.layer_norm)
+#            x = tc.layers.conv2d(x, 32, kernel_size=(3, 3), stride=2, normalizer_fn=tc.layers.layer_norm)
+#            x = tf.layers.flatten(x)
+            x = tf.concat([x, aux], axis=-1)
             x = tf.layers.dense(x, 256)
             x = tf.nn.relu(x)
             
