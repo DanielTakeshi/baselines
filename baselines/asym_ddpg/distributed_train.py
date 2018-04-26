@@ -1,0 +1,319 @@
+import os
+import time
+from collections import deque
+import pickle
+from baselines.asym_ddpg.ddpg import DDPG
+import baselines.common.tf_util as U
+import itertools
+import gc
+from baselines import logger
+import numpy as np
+import tensorflow as tf
+from mpi4py import MPI
+import cv2
+import gym
+import micoenv
+from drive_util import uploadToDrive
+PATH = "/tmp/model.ckpt"
+from pathlib import Path
+demo_states_dir = "/tmp/jm6214/demo_states"
+demo_states_template = demo_states_dir+ "/{}/{}.bullet"
+from threading import Thread
+home = str(Path.home())
+
+
+class Renderer(object):
+    def __init__(self, type, run_name, epoch, seed=None):
+        self.directory = home + '/ddpg_video_buffer/'
+        self.run_name= run_name
+        if not seed is None:
+            run_name = run_name + str(seed)
+        self.fname= '{}-{}-{}.avi'.format(type, run_name, epoch + 1)
+        fourcc = cv2.VideoWriter_fourcc(*"XVID")
+        self.rgb = cv2.VideoWriter(self.directory + self.fname, fourcc, 30.0, (84, 84))
+
+    def record_frame(self, frame, reward):
+        frame = np.array(frame[:,:,0:3].copy()*255, dtype=np.uint8)
+        cv2.putText(frame,format(reward, '.2f'), (40,15), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255,0,0), 1)
+        self.rgb.write(frame)
+
+    def finalize_and_upload(self):
+        self.rgb.release()
+        uploadToDrive(self.run_name, self.fname, self.directory + self.fname, delete=True)
+
+##### Stuff to be done in workers ########
+class RolloutWorker(object):
+    def __init__(self, env_id, agent, num_steps, run_name, reset_to_demo_rate, seed):
+        self.num_steps = num_steps
+        self.reset_to_demo_rate = reset_to_demo_rate
+        self.advance_epoch()
+        self.run_name = run_name
+        self.agent = agent
+        self.env_id = env_id
+        self.seed = seed
+        if seed == 0:
+            self.renderer = Renderer("rollout", run_name, 0, seed)
+        else:
+            self.renderer = None
+        self.rendering = seed == 0 # Render only first one
+        self.steps_to_render = 300
+
+    def advance_epoch(self):
+        self.epoch_rewards = []
+        self.epoch_qs = []
+
+    def exec_rollouts(self):
+        with self.agent.sess.as_default():
+            env = gym.make(self.env_id)
+            env.seed(self.seed)
+            obs0, aux0, state0 = env.reset(), env.get_aux(), env.get_state()
+            episode_reward = 0
+            goal, goal_obs = env.goalstate(), env.goalobs()
+            episodes = 1
+            epoch_episodes = 1
+
+            for i in range(self.num_steps):
+                if not self.renderer and np.random.uniform(0,1) < 0.0005:
+                    self.steps_to_render = 300
+                    self.renderer = Renderer("rollout", self.run_name, i, self.seed)
+                if self.renderer and self.steps_to_render == 0:
+                    self.renderer.finalize_and_upload()
+                    self.renderer = None
+
+                action, q = self.agent.pi(obs0, aux0, goal, state0, apply_noise=True, compute_Q=True)
+                self.epoch_qs.append(q)
+                assert action.shape == env.action_space.shape
+                obs1, r, done, info = env.step(action)
+                episode_reward += r
+                state1, aux1 = env.get_state(), env.get_aux()
+                self.agent.store_transition(state0, obs0, action, r, state1, obs1, done, goal, goal_obs, aux0, aux1)
+                if self.renderer and self.steps_to_render > 0:
+                    frame = env.render(mode="rgb_array")
+                    self.renderer.record_frame(frame, r)
+                    self.steps_to_render -= 1
+                obs0, aux0, state0 = obs1, aux1, state1
+                if done:
+
+                    self.agent.save_reward(episode_reward)
+                    episodes += 1
+                    self.epoch_rewards.append(episode_reward)
+                    episode_reward = 0.
+                    if np.random.uniform(0, 1) < self.reset_to_demo_rate:
+                        while (True):
+                            memory = self.agent.memory
+
+                            with memory.lock:
+                                demo_index = np.random.randint(0, memory._num_demonstrations)
+                                state = memory._storage[demo_index][0]
+                                terminal_demo = False
+                                for di in range(demo_index, demo_index + 1):
+                                    terminal_demo = terminal_demo or memory._storage[di % memory._num_demonstrations][6]
+                            if not terminal_demo:
+                                break
+                        fn = demo_states_template.format(self.run_name, demo_index)
+                        obs0 = env.reset_to_state(state, fn=fn)
+                    else:
+                        obs0 = env.reset()
+                    aux0, state0 = env.get_aux(), env.get_state()
+                    goal, goal_obs = env.goalstate(), env.goalobs()
+                    
+class DistributedTrain(object):
+    def __init__(self, run_name, agent, env, nb_rollout_steps, num_pretrain_steps, nb_epochs, nb_epoch_cycles, nb_train_steps, demo_env, demo_policy, render_demo, num_demo_steps, reset_to_demo_rate, render_eval, eval_env, nb_eval_steps, env_id):
+        # Misc params
+        self.run_name = run_name
+        self.agent = agent
+
+
+        # Main rollout params
+        self.nb_rollout_steps = nb_rollout_steps
+
+        # Train params
+        self.num_pretrain_steps = num_pretrain_steps
+        self.nb_epochs = nb_epochs
+        self.nb_epoch_cycles = nb_epoch_cycles
+        self.nb_train_steps = nb_train_steps
+
+
+
+        # Demo params
+        self.demo_env = demo_env
+        self.demo_policy = demo_policy
+        self.render_demo = render_demo
+        self.num_demo_steps = num_demo_steps
+        self.reset_to_demo_rate = reset_to_demo_rate
+
+
+        # Render params
+        self.render_eval = render_eval
+        self.eval_env = eval_env
+        self.nb_eval_steps = nb_eval_steps
+
+        self.env_id = env_id
+
+    def start(self):
+        with U.single_threaded_session() as sess:
+            self.agent.initialize(sess)
+            self._write_summary()
+
+            sess.graph.finalize()
+            if self.demo_policy:
+                self._initialize_memory_with_policy()
+            self.agent.memory.demonstrationsDone()
+            self.pretrain()
+            return self.train()
+
+    #### Functions to be done synchronously ######
+    def train(self):
+        num_steps = self.nb_epochs * self.nb_epoch_cycles * self.nb_rollout_steps
+        rws = []
+        for i in range(5):
+            rw = RolloutWorker(self.env_id, self.agent, num_steps,self.run_name, self.reset_to_demo_rate, i)
+            thread = Thread(target = rw.exec_rollouts, daemon=True)
+            thread.start()
+            rws.append(rw)
+        eval_episodes = 1
+        final_evals = []
+        iteration = 0
+        for epoch in range(self.nb_epochs):
+            for cycle in range(self.nb_epoch_cycles):
+                print ("Cycle: {}/{}".format(cycle, self.nb_epoch_cycles) +
+                       "["+ "-" * cycle + " " * (self.nb_epoch_cycles - cycle) + "]"
+                 , end="\r")
+                self.agent.memory.grow_limit(self.nb_rollout_steps)
+                for t_train in range(self.nb_train_steps):
+                    cl, al = self.agent.train(iteration)
+                    iteration += 1
+                    self.agent.update_target_net()
+            logger.record_tabular("epoch", epoch)
+            logger.record_tabular("total transitions", self.agent.memory.total_transitions)
+            logger.record_tabular("run_name", self.run_name)
+            all_rewards = list(itertools.chain(*[rw.epoch_rewards for rw in rws]))
+            all_qs = list(itertools.chain(*[rw.epoch_qs for rw in rws]))
+            logger.record_tabular("rollout_rewards", np.mean(all_rewards) if all_rewards else "none")
+            logger.record_tabular("rollout_qs", np.mean(all_qs) if all_qs else "none")
+            for rw in rws:
+                rw.advance_epoch()
+            ### Evaluate #####
+            print ("Executed epoch cycles, starting the evaluation.")
+            eval_obs0, aux0, state0 = self.eval_env.reset(), self.eval_env.get_aux(), self.eval_env.get_state()
+            goal, goal_obs = self.eval_env.goalstate(), self.eval_env.goalobs()
+            eval_episode_reward = 0.
+            eval_episode_rewards = []
+            eval_qs = []
+            if self.render_eval:
+                renderer = Renderer("eval", self.run_name, epoch)
+            for t_rollout in range(self.nb_eval_steps):
+                print ("Evaluation {}/{}".format(t_rollout, self.nb_eval_steps), end="\r")            
+                eval_action, eval_q = self.agent.pi(eval_obs0, aux0, goal, state0, apply_noise=False, compute_Q=True)
+                eval_obs0, eval_r, eval_done, eval_info = self.eval_env.step( eval_action)
+                aux0, state0 = self.eval_env.get_aux(), self.eval_env.get_state()
+                eval_qs.append(eval_q)
+
+                if self.render_eval:
+                    frame = self.eval_env.render(mode="rgb_array")
+                    renderer.record_frame(frame, eval_r)
+                eval_episode_reward += eval_r
+                if eval_done:
+                    eval_obs0, aux0, state0 = self.eval_env.reset(), self.eval_env.get_aux(), self.eval_env.get_state()
+                    eval_episode_rewards.append(eval_episode_reward)
+                    self.agent.save_eval_reward(eval_episode_reward, eval_episodes)
+                    eval_episodes += 1
+                    eval_episode_reward = 0.
+                    goal, goal_obs = self.eval_env.goalstate(), self.eval_env.goalobs()
+
+            if self.render_eval:
+                renderer.finalize_and_upload()
+            if eval_episode_rewards and epoch > self.nb_epochs - 5:
+                final_evals.append(np.mean(eval_episode_rewards))
+            logger.record_tabular("eval_rewards", np.mean(eval_episode_rewards) if eval_episode_rewards else "none")
+            logger.record_tabular("eval_qs", np.mean(eval_qs) if eval_qs else "none")
+            logger.dump_tabular()
+            logger.info('')
+        return - np.mean(final_evals)
+
+    def pretrain(self):
+        iteration = 0
+        while self.num_pretrain_steps > 0:
+            print ("Pretrain: {}/{}".format(iteration, self.num_pretrain_steps)
+                 , end="\r")
+            # Adapt param noise, if necessary.
+            cl, al = self.agent.train(iteration, pretrain=True)
+            iteration +=1
+            self.agent.update_target_net()
+            self.num_pretrain_steps -= 1
+
+
+
+    def _initialize_memory_with_policy(self):
+        print("Start collecting demo transitions")
+        obs0, aux0, state0 = self.demo_env.reset(), self.demo_env.get_aux(), self.demo_env.get_state()
+        self.demo_policy.reset()
+        goal, goal_obs = self.demo_env.goalstate(), self.demo_env.goalobs()
+        os.makedirs(demo_states_dir+"/"+self.run_name, exist_ok=True)
+
+        if self.render_demo:
+            renderer = Renderer("demo", self.run_name, 0)
+
+        for i in range(self.num_demo_steps):
+            print ("Demo: {}/{}".format(i, self.num_demo_steps)
+                 , end="\r")
+            action = self.demo_policy.choose_action(state0)
+            fn = demo_states_template.format(self.run_name, i)
+            self.demo_env.store_state(fn)
+            obs1, r, done, info = self.demo_env.step(action)
+            aux1, state1 = self.demo_env.get_aux(), self.demo_env.get_state()
+            self.agent.store_transition(state0, obs0, action, r, state1, obs1, done, goal, goal_obs, aux0, aux1, demo=True)
+            obs0, aux0, state0 = obs1, aux1, state1
+            if self.render_demo:
+                frame = self.demo_env.render(mode="rgb_array")
+                renderer.record_frame(frame, r)
+            if done:
+                obs0, aux0, state0 = self.demo_env.reset(), self.demo_env.get_aux(), self.demo_env.get_state()
+                self.demo_policy.reset()
+                goal, goal_obs == self.demo_env.goalstate(), self.demo_env.goalobs()
+        if self.render_demo:
+            renderer.finalize_and_upload()
+
+        print("Collected {} demo transition.".format(self.agent.memory._num_demonstrations))
+    def _write_summary(self):
+        training_text_summary = {
+            "env_data": {
+                "env:": str(self.eval_env),
+                "run_name": self.run_name,
+                "obs_shape":  self.eval_env.observation_space.shape,
+                "action_shace":  self.eval_env.action_space.shape,
+                "aux_shape":  self.eval_env.aux_space.shape
+            },
+            "demo_data": {
+                "policy": self.demo_policy.__class__.__name__,
+                "number_of_steps": self.num_demo_steps,
+            },
+            "training_data": {
+                "nb_train_steps": self.nb_train_steps,
+                "nb_rollout_steps": self.nb_rollout_steps,
+                "num_pretrain_steps": self.num_pretrain_steps,
+                "nb_epochs": self.nb_epochs,
+                "nb_epoch_cycles": self.nb_epoch_cycles,
+            }
+        }
+        self.agent.write_summary(training_text_summary)
+
+
+
+def train(env,env_id, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, param_noise, actor, critic,
+    normalize_returns, normalize_observations, normalize_aux, critic_l2_reg, actor_lr, critic_lr, action_noise,
+    popart, gamma, clip_norm, nb_train_steps, nb_rollout_steps, nb_eval_steps, batch_size, memory, load_from_file,
+    run_name, lambda_pretrain, lambda_1step, lambda_nstep, replay_beta,reset_to_demo_rate, tau=0.01, eval_env=None, demo_policy=None, num_demo_steps=0, demo_env=None, param_noise_adaption_interval=50, render_demo=False, num_pretrain_steps=0):
+    assert (np.abs(env.action_space.low) == env.action_space.high).all()  # we assume symmetric actions.
+    agent = DDPG(actor, critic, memory, env.observation_space.shape, env.action_space.shape, env.state_space.shape, env.aux_space.shape,
+        gamma=gamma, tau=tau, normalize_returns=normalize_returns, normalize_observations=normalize_observations,normalize_aux=normalize_aux,
+        batch_size=batch_size, action_noise=action_noise, param_noise=param_noise, critic_l2_reg=critic_l2_reg,
+        actor_lr=actor_lr, critic_lr=critic_lr, enable_popart=popart, clip_norm=clip_norm,
+        reward_scale=reward_scale, run_name=run_name, lambda_pretrain=lambda_pretrain, lambda_nstep=lambda_nstep, lambda_1step=lambda_1step,
+        replay_beta=replay_beta)
+    dt  = DistributedTrain(run_name, agent, env, nb_rollout_steps, num_pretrain_steps, nb_epochs, nb_epoch_cycles, nb_train_steps, demo_env, demo_policy, render_demo, num_demo_steps, reset_to_demo_rate, render_eval, eval_env, nb_eval_steps, env_id)
+    return dt.start()
+
+
+
+

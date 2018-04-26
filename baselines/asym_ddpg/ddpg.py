@@ -1,6 +1,6 @@
 from copy import copy
 from functools import reduce
-
+import resource
 import numpy as np
 import tensorflow as tf
 import tensorflow.contrib as tc
@@ -86,6 +86,8 @@ class DDPG(object):
 
         self.nstep_steps = tf.placeholder(tf.float32, shape=(None, 1), name='nstep_reached')
         self.nstep_critic_target = tf.placeholder(tf.float32, shape=(None, 1), name='nstep_critic_target')
+        self.memory_size = tf.placeholder(tf.float32, shape=None, name='memory_size')
+        self.rss = tf.placeholder(tf.float32, shape=None, name='rss')
 
 
         self.param_noise_stddev = tf.placeholder(tf.float32, shape=(), name='param_noise_stddev')
@@ -129,6 +131,7 @@ class DDPG(object):
         self.beta = replay_beta
         self.run_name = run_name
         self.lambda_pretrain = lambda_pretrain
+        self.ep = 0
 
         # Observation normalization.
         if self.normalize_observations:
@@ -299,6 +302,10 @@ class DDPG(object):
         tf.summary.histogram("pretrain_samples", self.pretraining_tf)
         tf.summary.scalar("bc_loss", self.bc_loss)
         tf.summary.scalar("original_actor_loss", self.original_actor_loss)
+        tf.summary.scalar("memory_size", self.memory_size)
+        tf.summary.scalar("rss", self.rss)
+        
+        
 
         self.scalar_summaries = tf.summary.merge_all()
         # reward
@@ -309,9 +316,10 @@ class DDPG(object):
         self.writer = tf.summary.FileWriter(home + '/fyp_summaries/low_dim/'+ self.run_name, graph=tf.get_default_graph())
 
 
-    def save_reward(self, r, ep):
+    def save_reward(self, r):
+        self.ep += 1
         summary = self.sess.run(self.r_plot, feed_dict={self.r_plot_in: r})
-        self.writer.add_summary(summary, ep)
+        self.writer.add_summary(summary, self.ep)
 
     def save_eval_reward(self, r, ep):
         summary = self.sess.run(self.r_plot_eval, feed_dict={self.r_plot_in_eval: r})
@@ -428,6 +436,8 @@ class DDPG(object):
             self.nstep_critic_target: target_Q_nstep,
             self.pretraining_tf: batch['demos'].astype('float32'),
             self.importance_weights: batch['weights'],
+            self.memory_size: len(self.memory._storage),
+            self.rss: resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         })
         self.memory.update_priorities(batch['idxes'], td_errors)
         self.actor_optimizer.update(actor_grads, stepsize=self.actor_lr)

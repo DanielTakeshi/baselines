@@ -7,7 +7,7 @@ from baselines.common.misc_util import (
     set_global_seeds,
     boolean_flag,
 )
-import baselines.asym_ddpg.training as training
+import baselines.asym_ddpg.distributed_train as training
 from baselines.asym_ddpg.models import Actor, Critic
 from baselines.asym_ddpg.prioritized_memory import PrioritizedMemory
 from baselines.asym_ddpg.noise import *
@@ -66,7 +66,8 @@ def run(env_id, seed, noise_type, layer_norm, evaluation,demo_policy, **kwargs):
 
     #TODO:
 
-    memory = PrioritizedMemory(limit=int(1e5), alpha=0.8)
+    memory = PrioritizedMemory(limit=int(1e4 * 3), alpha=0.8)
+
     critic = Critic(layer_norm=layer_norm)
     actor = Actor(nb_actions, layer_norm=layer_norm)
 
@@ -87,13 +88,14 @@ def run(env_id, seed, noise_type, layer_norm, evaluation,demo_policy, **kwargs):
     demo_policy_object = None
     if demo.policies[demo_policy]:
         demo_policy_object = demo.policies[demo_policy]()
-    training.train(env=env, eval_env=eval_env, param_noise=param_noise,
+    eval_avg = training.train(env=env,env_id=env_id, eval_env=eval_env, param_noise=param_noise,
         action_noise=action_noise, actor=actor, critic=critic, memory=memory, demo_policy=demo_policy_object, demo_env=demo_env, **kwargs)
     env.close()
     if eval_env is not None:
         eval_env.close()
     if rank == 0:
         logger.info('total runtime: {}s'.format(time.time() - start_time))
+    return eval_avg
 
 
 def parse_args():

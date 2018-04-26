@@ -18,10 +18,11 @@ demo_states_dir = "/tmp/jm6214/demo_states"
 demo_states_template = demo_states_dir+ "/{}/{}.bullet"
 
 home = str(Path.home())
+@profile
 def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, param_noise, actor, critic,
     normalize_returns, normalize_observations, normalize_aux, critic_l2_reg, actor_lr, critic_lr, action_noise,
     popart, gamma, clip_norm, nb_train_steps, nb_rollout_steps, nb_eval_steps, batch_size, memory, load_from_file,
-    run_name, lambda_pretrain, lambda_1step, lambda_nstep, replay_beta,reset_to_demo_rate, tau=0.01, eval_env=None, demo_policy=None, num_demo_steps=0, demo_env=None, param_noise_adaption_interval=50, render_demo=False, num_pretrain_steps=0):
+    run_name, lambda_pretrain, lambda_1step, lambda_nstep, replay_beta,reset_to_demo_rate, tau=0.01, eval_env=None, demo_policy=None, num_demo_steps=0, demo_env=None, param_noise_adaption_interval=50, render_demo=False, num_pretrain_steps=0, **kwargs):
     rank = MPI.COMM_WORLD.Get_rank()
 
 
@@ -150,6 +151,7 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                  , end="\r")
                 # Perform rollouts.
                 for t_rollout in range(nb_rollout_steps):
+                    print("rollout {}/{}".format(t_rollout, nb_rollout_steps))
                     # Predict next action.
                     aux0 = env.get_aux()
                     state =  env.get_state()
@@ -181,7 +183,7 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
 
                     if done:
                         # Episode done.
-                        agent.save_reward(episode_reward, episodes)
+                        agent.save_reward(episode_reward)
                         epoch_episode_rewards.append(episode_reward)
                         episode_rewards_history.append(episode_reward)
                         epoch_episode_steps.append(episode_step)
@@ -211,7 +213,10 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
 
 
                 # Train.
+                memory.grow_limit(nb_rollout_steps)
+
                 epoch_actor_losses = []
+
                 epoch_critic_losses = []
                 epoch_adaptive_distances = []
                 for t_train in range(nb_train_steps):
