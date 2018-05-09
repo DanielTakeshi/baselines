@@ -157,7 +157,8 @@ class DDPG(object):
         target_actor.name = 'target_actor'
         self.target_actor = target_actor
 
-        self.actor_tf, self.state0_actor = actor(self.normalized_obs0, self.normalized_aux0)
+        self.actor_tf, normalized_state0_actor = actor(self.normalized_obs0, self.normalized_aux0)
+        self.state0_actor = denormalize(normalized_state0_actor, self.state_rms)
         next_actions, _ = target_actor(self.normalized_obs1, self.normalized_aux1)
         noise = tf.distributions.Normal(tf.zeros_like(next_actions),
             self.target_policy_noise
@@ -227,7 +228,7 @@ class DDPG(object):
             self.bc_loss = (tf.reduce_sum(demo_better_than_critic * self.action_diffs) * self.lambda_pretrain / (tf.reduce_sum(self.pretraining_tf) + 1e-6))
             self.original_actor_loss = -tf.reduce_mean(self.critic_with_actor_tfs[0])
 
-            self.state_predict_loss = tf.reduce_mean(tf.square(self.state0_actor - self.normalized_state0)) * self.lambda_state_predict
+            self.state_predict_loss = tf.reduce_mean(tf.square(self.state0_actor - self.state0)) * self.lambda_state_predict
 
 
             self.actor_loss = self.original_actor_loss + self.bc_loss + self.state_predict_loss
@@ -345,13 +346,12 @@ class DDPG(object):
         feed_dict = {self.obs0: [obs], self.aux0: [aux], self.state0:[ state0]}
         if compute_Q:
 
-            action, q, normalized_state = self.sess.run([actor_tf, self.critic_with_actor_tfs[0], self.state0_actor], feed_dict=feed_dict)
+            action, q, state = self.sess.run([actor_tf, self.critic_with_actor_tfs[0], self.state0_actor], feed_dict=feed_dict)
 
         else:
-            action, normalized_state = self.sess.run([actor_tf, self.state0_actor], feed_dict=feed_dict)
+            action, state = self.sess.run([actor_tf, self.state0_actor], feed_dict=feed_dict)
             q = None
         action = action.flatten()
-        state = denormalize(normalized_state, self.state_rms)
         if self.action_noise is not None and apply_noise:
             noise = self.action_noise()
             assert noise.shape == action.shape
