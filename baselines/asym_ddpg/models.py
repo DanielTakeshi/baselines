@@ -3,8 +3,11 @@ import tensorflow.contrib as tc
 
 
 class Model(object):
-    def __init__(self, name):
+    def __init__(self, num_dense_layers, dense_layer_size, layer_norm,name):
         self.name = name
+        self.num_dense_layers = num_dense_layers
+        self.dense_layer_size = dense_layer_size
+        self.layer_norm = layer_norm
 
     @property
     def vars(self):
@@ -20,10 +23,12 @@ class Model(object):
 
 
 class Actor(Model):
-    def __init__(self, nb_actions, name='actor', layer_norm=False):
-        super(Actor, self).__init__(name=name)
+    def __init__(self, nb_actions, n_state,  num_dense_layers, dense_layer_size, layer_norm, conv_size='small',name='actor'):
+        super(Actor, self).__init__( num_dense_layers, dense_layer_size, layer_norm,name=name)
         self.nb_actions = nb_actions
-        self.layer_norm = layer_norm
+        self.n_state = n_state
+        self.conv_size = conv_size
+
 
     def __call__(self, obs, aux, reuse=False):
         with tf.variable_scope(self.name) as scope:
@@ -31,54 +36,48 @@ class Actor(Model):
                 scope.reuse_variables()
             x = obs
             if len(obs.shape) > 2:
-                x = tc.layers.conv2d(x, 32, kernel_size=(3,3), stride=2, normalizer_fn=tc.layers.layer_norm)
-                x = tc.layers.conv2d(x, 32, kernel_size=(3, 3), stride=2, normalizer_fn=tc.layers.layer_norm)
-                x = tc.layers.conv2d(x, 32, kernel_size=(3, 3), stride=2, normalizer_fn=tc.layers.layer_norm)
-                x = tc.layers.conv2d(x, 32, kernel_size=(3, 3), stride=2, normalizer_fn=tc.layers.layer_norm)
+                if self.conv_size == 'small':
+                    x = tc.layers.conv2d(x, 32, kernel_size=(3, 3), stride=2, normalizer_fn=tc.layers.layer_norm)
+                    x = tc.layers.conv2d(x, 32, kernel_size=(3, 3), stride=2, normalizer_fn=tc.layers.layer_norm)
+                    x = tc.layers.conv2d(x, 32, kernel_size=(3, 3), stride=2, normalizer_fn=tc.layers.layer_norm)
+                    x = tc.layers.conv2d(x, 32, kernel_size=(3, 3), stride=2, normalizer_fn=tc.layers.layer_norm)                    
+                elif self.conv_size == 'large':
+                    x = tc.layers.conv2d(x, 32, kernel_size=(8,8), stride=4, normalizer_fn=tc.layers.layer_norm)
+                    x = tc.layers.conv2d(x, 32, kernel_size=(4, 4), stride=2, normalizer_fn=tc.layers.layer_norm)
+                    x = tc.layers.conv2d(x, 32, kernel_size=(3, 3), stride=1, normalizer_fn=tc.layers.layer_norm)
+                    x = tc.layers.conv2d(x, 32, kernel_size=(3, 3), stride=1, normalizer_fn=tc.layers.layer_norm)
+                else:
+                    raise('Unknow size')
                 x = tf.layers.flatten(x)
-
             x = tf.concat([x, aux], axis=-1)
-            x = tf.layers.dense(x, 256)
-            x = tf.nn.relu(x)
-            
-            x = tf.layers.dense(x, 256)
-            x = tf.nn.relu(x)
+            for i in range(self.num_dense_layers):
+                x = tf.layers.dense(x, self.dense_layer_size)
+                x = tc.layers.layer_norm(x, center=True, scale=True)
+                x = tf.nn.relu(x)
+            x = tf.layers.dense(x, self.nb_actions + self.n_state, kernel_initializer=tf.random_uniform_initializer(minval=-3e-3, maxval=3e-3))
+            pi, state = tf.split(x, [self.nb_actions, self.n_state], 1)
 
-            x = tf.layers.dense(x, 256)
-            x = tf.nn.relu(x)
-
-            x = tf.layers.dense(x, 256)
-            x = tf.nn.relu(x)
-
-            x = tf.layers.dense(x, self.nb_actions, kernel_initializer=tf.random_uniform_initializer(minval=-3e-3, maxval=3e-3))
-            x = tf.nn.tanh(x)
-        return x
+            pi = tf.nn.tanh(pi)
+        return pi, state
 
 
 class Critic(Model):
-    def __init__(self, name='critic', layer_norm=False):
-        super(Critic, self).__init__(name=name)
-        self.layer_norm = layer_norm
+    def __init__(self,  num_dense_layers, dense_layer_size, layer_norm, name='critic',):
+        super(Critic, self).__init__(num_dense_layers, dense_layer_size, layer_norm,name=name)
 
-    def __call__(self, state, goal, action, aux, reuse=False):
+    def __call__(self, state, action, aux, reuse=False):
         with tf.variable_scope(self.name) as scope:
             if reuse:
                 scope.reuse_variables()
 
-            x = tf.concat([state, goal, action, aux], axis=-1)
+            x = tf.concat([state, action, aux], axis=-1)
 
-            x = tf.layers.dense(x, 256)
-            x = tf.nn.relu(x)
+            for i in range(self.num_dense_layers):
+                x = tf.layers.dense(x, self.dense_layer_size)
+                if self.layer_norm:
 
-            x = tf.layers.dense(x, 256)
-            x = tf.nn.relu(x)
-
-            x = tf.layers.dense(x, 256)
-            x = tf.nn.relu(x)
-
-            x = tf.layers.dense(x, 256)
-            x = tf.nn.relu(x)
-
+                    x = tc.layers.layer_norm(x, center=True, scale=True)
+                x = tf.nn.relu(x)
             x = tf.layers.dense(x, 1, kernel_initializer=tf.random_uniform_initializer(minval=-3e-3, maxval=3e-3))
         return x
 

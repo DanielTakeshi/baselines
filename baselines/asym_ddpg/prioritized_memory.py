@@ -19,7 +19,7 @@ class Memory(object):
         self._next_idx = 0
         self._adding_demonstrations = True
         self._num_demonstrations = 0
-        self.storable_elements = ["states0", "obs0", "actions", "rewards", "states1", "obs1", "terminals1", "goals", "goal_observations", "aux0", "aux1"]
+        self.storable_elements = ["states0", "obs0", "actions", "rewards", "states1", "obs1", "terminals1", "goals", "goal_observations", "aux0", "aux1", "demo_state_id"]
     def __len__(self):
         with self.lock:
             return len(self._storage)
@@ -78,16 +78,17 @@ class Memory(object):
 
 
 class PrioritizedMemory(Memory):
-    def  __init__(self, limit, alpha, transition_small_epsilon=1e-6, demonstartion_epsilon=0.1):
+    def  __init__(self, limit, alpha, transition_small_epsilon=1e-6, demo_epsilon=0.2, nb_rollout_steps=100):
         super(PrioritizedMemory, self).__init__(limit)
         assert alpha > 0
         self._alpha = alpha
         self._transition_small_epsilon = transition_small_epsilon
-        self._demonstartion_epsilon = demonstartion_epsilon
+        self._demo_epsilon = demo_epsilon
         self._print_counter = 0
 
         self._first_time_sample = True
         self._indexes = []
+        self.nb_rollout_steps = nb_rollout_steps
 
         it_capacity = 1
         while it_capacity < self._maxsize:
@@ -97,7 +98,7 @@ class PrioritizedMemory(Memory):
         self._it_min = MinSegmentTree(it_capacity)
         self._max_priority = 1.0
         self._total_transitions = 0
-        self._total_transition_limit = 100
+        self._total_transition_limit = self.nb_rollout_steps
     @property
     def total_transitions(self):
         with self.lock:
@@ -105,7 +106,7 @@ class PrioritizedMemory(Memory):
     
     def grow_limit(self, num):
         with self.condition:
-            self._total_transition_limit += 100
+            self._total_transition_limit += self.nb_rollout_steps
             self.condition.notify_all()
 
     def append(self, *args, **kwargs):
@@ -147,21 +148,19 @@ class PrioritizedMemory(Memory):
 
     def sample(self, batch_size, beta, pretrain=False):
         with self.lock:
-            assert beta > 0
             idxes = self._sample_proportional(batch_size, pretrain)
             demos = [i < self._num_demonstrations for i in idxes]
             weights = []
-            p_min = self._it_min.min() / self._it_sum.sum()
+            p_sum = self._it_sum.sum()
             for idx in idxes:
-                p_sample = self._it_sum[idx] / self._it_sum.sum()
-                weight = (p_sample * len(self._storage)) ** (-beta)
+                p_sample = self._it_sum[idx] / p_sum
+                weight = ((1.0 / p_sample) * (1.0/len(self._storage))) ** (beta)
                 weights.append(weight)
             weights = np.array(weights) / np.max(weights)
             encoded_sample = self._get_batches_for_idxes(idxes)
             encoded_sample['weights'] = array_min2d(weights)
             encoded_sample['idxes'] = idxes
             encoded_sample['demos'] = array_min2d(demos)
-
             return encoded_sample
 
     def sample_rollout(self, batch_size, nsteps, beta, gamma, pretrain=False):
@@ -180,22 +179,16 @@ class PrioritizedMemory(Memory):
                 r = transitions['rewards']
                 for i in range(len(r)):
                     summed_reward += (gamma ** i) * r[i]
-                    # summed_reward +=  1 * r[i]
                     count = i
                     if terminals[i]:
                         terminal = 1.0
                         break
-                # n_step_batches["obs0"].append(transitions["obs0"])
                 n_step_batches["step_reached"].append(count)
                 n_step_batches["obs1"].append(transitions["obs1"][count])
                 n_step_batches["terminals1"].append(terminal)
                 n_step_batches["rewards"].append(summed_reward)
-                # n_step_batches["states0"].append(transitions["states0"])
                 n_step_batches["states1"].append(transitions["states1"][count])
-                # n_step_batches["aux0"].append(transitions["aux0"])
                 n_step_batches["aux1"].append(transitions["aux1"][count])
-                n_step_batches["goals"].append(transitions["goals"][count])
-                # n_step_batches["goal_observations"].append(transitions["goal_observations"])
                 n_step_batches["actions"].append(transitions["actions"][0])
             n_step_batches['demos'] = batches['demos']
             n_step_batches = {k: array_min2d(v) for k, v in n_step_batches.items()}
@@ -209,12 +202,11 @@ class PrioritizedMemory(Memory):
             priorities = td_errors + (actor_losses ** 2) + self._transition_small_epsilon
             for i in range(len(priorities)):
                 if idxes[i] < self._num_demonstrations:
-                    # priorities[i] += self._demonstartion_epsilon
-                    priorities[i] += np.max(priorities)
+                    priorities[i] += np.max(priorities) * self._demo_epsilon
             assert len(idxes) == len(priorities)
             for idx, priority in zip(idxes, priorities):
                 assert priority > 0
                 assert 0 <= idx < len(self._storage)
                 self._it_sum[idx] = priority ** self._alpha
                 self._it_min[idx] = priority ** self._alpha
-                self._max_priority = max(self._max_priority, priority)
+                self._max_priority = max(self._max_priority, priority ** self._alpha)

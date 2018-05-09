@@ -47,35 +47,18 @@ def get_target_updates(vars, target_vars, tau):
     assert len(soft_updates) == len(vars)
     return tf.group(*init_updates), tf.group(*soft_updates)
 
-
-def get_perturbed_actor_updates(actor, perturbed_actor, param_noise_stddev):
-    assert len(actor.vars) == len(perturbed_actor.vars)
-    assert len(actor.perturbable_vars) == len(perturbed_actor.perturbable_vars)
-
-    updates = []
-    for var, perturbed_var in zip(actor.vars, perturbed_actor.vars):
-        if var in actor.perturbable_vars:
-            logger.info('  {} <- {} + noise'.format(perturbed_var.name, var.name))
-            updates.append(tf.assign(perturbed_var, var + tf.random_normal(tf.shape(var), mean=0., stddev=param_noise_stddev)))
-        else:
-            logger.info('  {} <- {}'.format(perturbed_var.name, var.name))
-            updates.append(tf.assign(perturbed_var, var))
-    assert len(updates) == len(actor.vars)
-    return tf.group(*updates)
-
-
 class DDPG(object):
-    def __init__(self, actor, critic, memory, observation_shape, action_shape, state_shape, aux_shape, param_noise=None, action_noise=None,
+    def __init__(self, actor, critic, memory, observation_shape, action_shape, state_shape, aux_shape, action_noise=None,
         gamma=0.99, tau=0.001, normalize_returns=False, enable_popart=False, normalize_observations=True, normalize_state=True, normalize_aux=True,
-        batch_size=128, observation_range=(-10., 10.), action_range=(-1., 1.), state_range=(-4, 4), return_range=(-np.inf, np.inf), aux_range=(-10, 10),
-        adaptive_param_noise=True, adaptive_param_noise_policy_threshold=.1,
-        critic_l2_reg=0.001, actor_lr=1e-4, critic_lr=1e-3, clip_norm=None, reward_scale=1., replay_beta=0.4,lambda_1step=1.0, lambda_nstep=1.0, nsteps=10, run_name="unnamed_run", lambda_pretrain=0.0):
+        batch_size=128, observation_range=(-10., 10.), action_range=(-1., 1.), state_range=(-4, 4), return_range=(-250, 10), aux_range=(-10, 10),
+        critic_l2_reg=0.001, actor_lr=1e-4, critic_lr=1e-3, clip_norm=None, reward_scale=1., replay_beta=0.4,lambda_1step=1.0,
+         lambda_nstep=1.0, nsteps=10, run_name="unnamed_run", lambda_pretrain=0.0, target_policy_noise=0.2, target_policy_noise_clip=0.5,
+          policy_and_target_update_period=2, num_critics=2, lambda_state_predict=1.0, **kwargs):
 
         # Inputs.
         self.obs0 = tf.placeholder(tf.float32, shape=(None,) + observation_shape, name='obs0')
         self.obs1 = tf.placeholder(tf.float32, shape=(None,) + observation_shape, name='obs1')
 
-        self.goal = tf.placeholder(tf.float32, shape=(None,) + state_shape, name='goal')
         self.state0 = tf.placeholder(tf.float32, shape=(None,) + state_shape, name='state0')
         self.state1 = tf.placeholder(tf.float32, shape=(None,) + state_shape, name='state1')
 
@@ -89,15 +72,11 @@ class DDPG(object):
         self.memory_size = tf.placeholder(tf.float32, shape=None, name='memory_size')
         self.rss = tf.placeholder(tf.float32, shape=None, name='rss')
 
-
-        self.param_noise_stddev = tf.placeholder(tf.float32, shape=(), name='param_noise_stddev')
-
         self.aux0 = tf.placeholder(tf.float32, shape=(None,) + aux_shape, name='aux0')
         self.aux1 = tf.placeholder(tf.float32, shape=(None,) + aux_shape, name='aux1')
 
         self.pretraining_tf = tf.placeholder(tf.float32, shape=(None, 1),
                                              name='pretraining_tf')  # whether we use pre training or not
-        self.lambda_pretrain_in = tf.placeholder(tf.float32, shape=None, name='lamdba_pretrain_in')
         # Parameters.
 
         self.aux_shape = aux_shape
@@ -105,15 +84,12 @@ class DDPG(object):
         self.tau = tau
         self.memory = memory
         self.normalize_observations = normalize_observations
-        self.normalize_returns = normalize_returns
         self.normalize_state = normalize_state
         self.normalize_aux = normalize_aux
         self.action_noise = action_noise
-        self.param_noise = param_noise
         self.action_range = action_range
         self.return_range = return_range
         self.observation_range = observation_range
-        self.critic = critic
         self.actor = actor
         self.actor_lr = actor_lr
         self.state_range = state_range
@@ -127,11 +103,16 @@ class DDPG(object):
         self.critic_l2_reg = critic_l2_reg
         self.lambda_nstep = lambda_nstep
         self.lambda_1step = lambda_1step
+        self.lambda_state_predict = lambda_state_predict
         self.nsteps = nsteps
-        self.beta = replay_beta
+        self.replay_beta = replay_beta
         self.run_name = run_name
         self.lambda_pretrain = lambda_pretrain
+        self.target_policy_noise = target_policy_noise
+        self.target_policy_noise_clip = target_policy_noise_clip
         self.ep = 0
+        self.policy_and_target_update_period = policy_and_target_update_period
+
 
         # Observation normalization.
         if self.normalize_observations:
@@ -152,100 +133,104 @@ class DDPG(object):
         else:
             self.aux_rms = None
 
-
-
-
         with tf.name_scope('obs_preprocess') as scope:
-            normalized_obs0 = tf.clip_by_value(normalize(self.obs0, self.obs_rms),
+            self.normalized_obs0 = tf.clip_by_value(normalize(self.obs0, self.obs_rms),
                 self.observation_range[0], self.observation_range[1])
-            normalized_obs1 = tf.clip_by_value(normalize(self.obs1, self.obs_rms),
+            self.normalized_obs1 = tf.clip_by_value(normalize(self.obs1, self.obs_rms),
                 self.observation_range[0], self.observation_range[1])
         with tf.name_scope('state_preprocess'):
-            normalized_state0 = tf.clip_by_value(normalize(self.state0, self.state_rms),
+            self.normalized_state0 = tf.clip_by_value(normalize(self.state0, self.state_rms),
                 self.state_range[0], self.state_range[1])
-            normalized_state1 = tf.clip_by_value(normalize(self.state1, self.state_rms),
+            self.normalized_state1 = tf.clip_by_value(normalize(self.state1, self.state_rms),
                 self.state_range[0], self.state_range[1])
 
         with tf.name_scope('aux_preprocess'):
-            normalized_aux0 = tf.clip_by_value(normalize(self.aux0, self.aux_rms),
+            self.normalized_aux0 = tf.clip_by_value(normalize(self.aux0, self.aux_rms),
                     self.aux_range[0], self.aux_range[1])
-            normalized_aux1 = tf.clip_by_value(normalize(self.aux1, self.aux_rms),
+            self.normalized_aux1 = tf.clip_by_value(normalize(self.aux1, self.aux_rms),
                     self.aux_range[0], self.aux_range[1])
-            normalized_goal = self.goal
 
-        # Return normalization.
-        if self.normalize_returns:
-            with tf.variable_scope('ret_rms'):
-                self.ret_rms = RunningMeanStd()
-        else:
-            self.ret_rms = None
+
 
         # Create target networks.
         target_actor = copy(actor)
         target_actor.name = 'target_actor'
         self.target_actor = target_actor
-        target_critic = copy(critic)
-        target_critic.name = 'target_critic'
-        self.target_critic = target_critic
 
-        # Create networks and core TF parts that are shared across setup parts.
-        self.actor_tf = actor(normalized_obs0, normalized_aux0)
-        self.normalized_critic_tf = critic(normalized_state0, normalized_goal, self.actions, normalized_aux0)
-        self.critic_tf = denormalize(tf.clip_by_value(self.normalized_critic_tf, self.return_range[0], self.return_range[1]), self.ret_rms)
-        self.normalized_critic_with_actor_tf = critic(normalized_state0, normalized_goal, self.actor_tf, normalized_aux0, reuse=True)
-        self.critic_with_actor_tf = denormalize(tf.clip_by_value(self.normalized_critic_with_actor_tf, self.return_range[0], self.return_range[1]), self.ret_rms)
-        Q_obs1 = denormalize(target_critic(normalized_state1, normalized_goal, target_actor(normalized_obs1, normalized_aux1), normalized_aux1), self.ret_rms)
-        self.target_Q = self.rewards + (1. - self.terminals1) * tf.pow(gamma, self.nstep_steps) * Q_obs1
+        self.actor_tf, self.state0_actor = actor(self.normalized_obs0, self.normalized_aux0)
+        next_actions, _ = target_actor(self.normalized_obs1, self.normalized_aux1)
+        noise = tf.distributions.Normal(tf.zeros_like(next_actions),
+            self.target_policy_noise
+        ).sample()
+        noise = tf.clip_by_value(
+            noise,
+            -self.target_policy_noise_clip,
+            self.target_policy_noise_clip,
+        )
+
+        self.num_critics = num_critics
+        self.critics = [None] * num_critics
+        self.target_critics =  [None] * num_critics
+        self.critic_tfs = [None] * num_critics
+        self.critic_with_actor_tfs = [None] * num_critics
+        self.step_1_td_losses = [None] * num_critics
+        self.n_step_td_losses = [None] * num_critics
+        self.td_errors = [None] * num_critics
+        self.critic_losses = [None] * num_critics
+        self.critic_grads = [None] * num_critics
+        self.critic_optimizers = [None] * num_critics
+        Q_obs1s = [None] * num_critics
+        for i in range(num_critics):
+            current_critic = copy(critic)
+            current_critic.name = "critic" + str(i)
+            self.critics[i] = current_critic
+            self.target_critics[i] = copy(current_critic)
+            self.target_critics[i].name = 'target_critic'+str(i)
+            self.critic_tfs[i] = tf.clip_by_value(current_critic(self.normalized_state0, self.actions, self.normalized_aux0), self.return_range[0], self.return_range[1])
+            self.critic_with_actor_tfs[i] = tf.clip_by_value(current_critic(self.normalized_state0, self.actor_tf, self.normalized_aux0, reuse=True), self.return_range[0], self.return_range[1])
+            Q_obs1s[i] = self.target_critics[i](self.normalized_state1, next_actions + noise, self.normalized_aux1)
+
+        if num_critics == 2:
+            minQ = tf.minimum(Q_obs1s[0], Q_obs1s[1])
+        else:
+            minQ = Q_obs1s[0]
+
+        self.target_Q = self.rewards + (1. - self.terminals1) * tf.pow(gamma, self.nstep_steps) * minQ
         self.importance_weights = tf.placeholder(tf.float32, shape=(None, 1), name='importance_weights')
-        # Set up parts.
-        if self.param_noise is not None:
-            self.setup_param_noise(normalized_obs0, normalized_aux0)
         self.setup_actor_optimizer()
-        self.setup_critic_optimizer()
-        if self.normalize_returns and self.enable_popart:
-            self.setup_popart()
         self.setup_stats()
         self.setup_target_network_updates()
+        for i in range(num_critics):
+            self.setup_critic_optimizer(i)
         self.setup_summaries()
 
     def setup_target_network_updates(self):
         with tf.name_scope('target_net_updates'):
 
             actor_init_updates, actor_soft_updates = get_target_updates(self.actor.vars, self.target_actor.vars, self.tau)
-            critic_init_updates, critic_soft_updates = get_target_updates(self.critic.vars, self.target_critic.vars, self.tau)
-            self.target_init_updates = [actor_init_updates, critic_init_updates]
-            self.target_soft_updates = [actor_soft_updates, critic_soft_updates]
-
-    def setup_param_noise(self, normalized_obs0, normalized_aux0):
-        with tf.name_scope('param_noise'):
-
-            assert self.param_noise is not None
-
-            # Configure perturbed actor.
-            param_noise_actor = copy(self.actor)
-            param_noise_actor.name = 'param_noise_actor'
-            self.perturbed_actor_tf = param_noise_actor(normalized_obs0, normalized_aux0)
-            logger.info('setting up param noise')
-            self.perturb_policy_ops = get_perturbed_actor_updates(self.actor, param_noise_actor, self.param_noise_stddev)
-
-            # Configure separate copy for stddev adoption.
-            adaptive_param_noise_actor = copy(self.actor)
-            adaptive_param_noise_actor.name = 'adaptive_param_noise_actor'
-            adaptive_actor_tf = adaptive_param_noise_actor(normalized_obs0, normalized_aux0)
-            self.perturb_adaptive_policy_ops = get_perturbed_actor_updates(self.actor, adaptive_param_noise_actor, self.param_noise_stddev)
-            self.adaptive_policy_distance = tf.sqrt(tf.reduce_mean(tf.square(self.actor_tf - adaptive_actor_tf)))
+            target_init_updates = [actor_init_updates] 
+            target_soft_updates = [actor_soft_updates]
+            for i in range(self.num_critics):
+                init, soft = get_target_updates(self.critics[i].vars, self.target_critics[i].vars, self.tau)
+                target_init_updates.append(init)
+                target_soft_updates.append(soft)
+            self.target_init_updates = target_init_updates
+            self.target_soft_updates = target_soft_updates
 
     def setup_actor_optimizer(self):
         logger.info('setting up actor optimizer')
         with tf.name_scope('actor_optimizer'):
 
             self.action_diffs = tf.reduce_mean(tf.square(self.actions - self.actor_tf), 1)
-
-            demo_better_than_critic = self.critic_tf < self.critic_with_actor_tf
+            demo_better_than_critic = self.critic_tfs[0] < self.critic_with_actor_tfs[0]
             demo_better_than_critic = self.pretraining_tf * tf.cast(demo_better_than_critic, tf.float32)
             self.bc_loss = (tf.reduce_sum(demo_better_than_critic * self.action_diffs) * self.lambda_pretrain / (tf.reduce_sum(self.pretraining_tf) + 1e-6))
-            self.original_actor_loss = -tf.reduce_mean(self.critic_with_actor_tf)
-            self.actor_loss = self.original_actor_loss + self.bc_loss
+            self.original_actor_loss = -tf.reduce_mean(self.critic_with_actor_tfs[0])
+
+            self.state_predict_loss = tf.reduce_mean(tf.square(self.state0_actor - self.normalized_state0)) * self.lambda_state_predict
+
+
+            self.actor_loss = self.original_actor_loss + self.bc_loss + self.state_predict_loss
             self.number_of_demos_better = tf.reduce_sum(demo_better_than_critic)
             actor_shapes = [var.get_shape().as_list() for var in self.actor.trainable_vars]
             actor_nb_params = sum([reduce(lambda x, y: x * y, shape) for shape in actor_shapes])
@@ -255,24 +240,25 @@ class DDPG(object):
             self.actor_optimizer = MpiAdam(var_list=self.actor.trainable_vars,
                 beta1=0.9, beta2=0.999, epsilon=1e-08)
 
-    def setup_critic_optimizer(self):
-        with tf.name_scope('critic_optimizer'):
-            normalized_critic_target_tf = tf.clip_by_value(normalize(self.critic_target, self.ret_rms), self.return_range[0], self.return_range[1])
+    def setup_critic_optimizer(self, i):
+        with tf.name_scope('critic_optimizer'+str(i)):
+            critic_target_tf = tf.clip_by_value(self.critic_target, self.return_range[0], self.return_range[1])
 
-            normalized_nstep_critic_target_tf = tf.clip_by_value(normalize(self.nstep_critic_target, self.ret_rms), self.return_range[0], self.return_range[1])
+            nstep_critic_target_tf = tf.clip_by_value(self.nstep_critic_target, self.return_range[0], self.return_range[1])
 
-            td_error = tf.square(self.normalized_critic_tf - normalized_critic_target_tf)
-            self.step_1_td_loss = tf.reduce_mean(self.importance_weights * td_error) * self.lambda_1step
+            td_error = tf.square(self.critic_tfs[i] - critic_target_tf)
 
-            nstep_td_error = tf.square(self.normalized_critic_tf - normalized_nstep_critic_target_tf)
-            self.n_step_td_loss = tf.reduce_mean(self.importance_weights * nstep_td_error) * self.lambda_nstep
+            self.step_1_td_losses[i] = tf.reduce_mean(self.importance_weights * td_error) * self.lambda_1step
 
-            self.td_error = td_error + nstep_td_error
-            #self.td_error = td_error
-            self.critic_loss = self.step_1_td_loss + self.n_step_td_loss
+            nstep_td_error = tf.square(self.critic_tfs[i] - nstep_critic_target_tf)
+
+            self.n_step_td_losses[i] = tf.reduce_mean(self.importance_weights * nstep_td_error) * self.lambda_nstep
+
+            self.td_errors[i] = td_error + nstep_td_error
+            self.critic_losses[i] = self.step_1_td_losses[i] + self.n_step_td_losses[i]
 
             if self.critic_l2_reg > 0.:
-                critic_reg_vars = [var for var in self.critic.trainable_vars if 'kernel' in var.name and 'output' not in var.name]
+                critic_reg_vars = [var for var in self.critics[i].trainable_vars if 'kernel' in var.name and 'output' not in var.name]
                 for var in critic_reg_vars:
                     logger.info('  regularizing: {}'.format(var.name))
                 logger.info('  applying l2 regularization with {}'.format(self.critic_l2_reg))
@@ -280,40 +266,40 @@ class DDPG(object):
                     tc.layers.l2_regularizer(self.critic_l2_reg),
                     weights_list=critic_reg_vars
                 )
-                self.critic_loss += critic_reg
-            critic_shapes = [var.get_shape().as_list() for var in self.critic.trainable_vars]
+                self.critic_losses[i] += critic_reg
+            critic_shapes = [var.get_shape().as_list() for var in self.critics[i].trainable_vars]
             critic_nb_params = sum([reduce(lambda x, y: x * y, shape) for shape in critic_shapes])
             logger.info('  critic shapes: {}'.format(critic_shapes))
             logger.info('  critic params: {}'.format(critic_nb_params))
-            self.critic_grads = U.flatgrad(self.critic_loss, self.critic.trainable_vars, clip_norm=self.clip_norm)
-            self.critic_optimizer = MpiAdam(var_list=self.critic.trainable_vars,
+            self.critic_grads[i] = U.flatgrad(self.critic_losses[i], self.critics[i].trainable_vars, clip_norm=self.clip_norm)
+            self.critic_optimizers[i] = MpiAdam(var_list=self.critics[i].trainable_vars,
                 beta1=0.9, beta2=0.999, epsilon=1e-08)
 
 
 
     def setup_summaries(self):
         tf.summary.scalar("actor_loss", self.actor_loss)
-        tf.summary.scalar("critic_loss", self.critic_loss)
-        tf.summary.scalar("1step_loss", self.step_1_td_loss)
-        tf.summary.scalar("nstep_loss", self.n_step_td_loss)
+        for i in range(self.num_critics):
+            name_sufffix = str(i)
+            tf.summary.scalar("critic_loss" + name_sufffix, self.critic_losses[i])
+            tf.summary.scalar("1step_loss" + name_sufffix, self.step_1_td_losses[i])
+            tf.summary.scalar("nstep_loss" + name_sufffix, self.n_step_td_losses[i])
 
         tf.summary.scalar("percentage_of_demonstrations", tf.reduce_sum(self.pretraining_tf) / self.batch_size)
         tf.summary.scalar("number_of_demos_better_than_actor", self.number_of_demos_better)
         tf.summary.histogram("pretrain_samples", self.pretraining_tf)
         tf.summary.scalar("bc_loss", self.bc_loss)
+        tf.summary.scalar("state_predict_loss", self.state_predict_loss)
         tf.summary.scalar("original_actor_loss", self.original_actor_loss)
         tf.summary.scalar("memory_size", self.memory_size)
         tf.summary.scalar("rss", self.rss)
-        
-        
-
         self.scalar_summaries = tf.summary.merge_all()
         # reward
         self.r_plot_in = tf.placeholder(tf.float32, name='r_plot_in')
         self.r_plot = tf.summary.scalar("returns", self.r_plot_in)
         self.r_plot_in_eval = tf.placeholder(tf.float32, name='r_plot_in_eval')
         self.r_plot_eval = tf.summary.scalar("returns_eval", self.r_plot_in_eval)
-        self.writer = tf.summary.FileWriter(home + '/fyp_summaries/low_dim/'+ self.run_name, graph=tf.get_default_graph())
+        self.writer = tf.summary.FileWriter(home + '/aux_predict/'+ self.run_name, graph=tf.get_default_graph())
 
 
     def save_reward(self, r):
@@ -331,22 +317,18 @@ class DDPG(object):
             ops = []
             names = []
 
-            if self.normalize_returns:
-                ops += [self.ret_rms.mean, self.ret_rms.std]
-                names += ['ret_rms_mean', 'ret_rms_std']
-
             if self.normalize_observations:
                 ops += [tf.reduce_mean(self.obs_rms.mean), tf.reduce_mean(self.obs_rms.std)]
                 names += ['obs_rms_mean', 'obs_rms_std']
 
-            ops += [tf.reduce_mean(self.critic_tf)]
+            ops += [tf.reduce_mean(self.critic_tfs[0])]
             names += ['reference_Q_mean']
-            ops += [reduce_std(self.critic_tf)]
+            ops += [reduce_std(self.critic_tfs[0])]
             names += ['reference_Q_std']
 
-            ops += [tf.reduce_mean(self.critic_with_actor_tf)]
+            ops += [tf.reduce_mean(self.critic_with_actor_tfs[0])]
             names += ['reference_actor_Q_mean']
-            ops += [reduce_std(self.critic_with_actor_tf)]
+            ops += [reduce_std(self.critic_with_actor_tfs[0])]
             names += ['reference_actor_Q_std']
 
             ops += [tf.reduce_mean(self.actor_tf)]
@@ -354,42 +336,40 @@ class DDPG(object):
             ops += [reduce_std(self.actor_tf)]
             names += ['reference_action_std']
 
-            if self.param_noise:
-                ops += [tf.reduce_mean(self.perturbed_actor_tf)]
-                names += ['reference_perturbed_action_mean']
-                ops += [reduce_std(self.perturbed_actor_tf)]
-                names += ['reference_perturbed_action_std']
-
             self.stats_ops = ops
             self.stats_names = names
 
-    def pi(self, obs, aux, goal, state0, apply_noise=True, compute_Q=True):
-        if self.param_noise is not None and apply_noise:
-            actor_tf = self.perturbed_actor_tf
-        else:
-            actor_tf = self.actor_tf
-        feed_dict = {self.obs0: [obs], self.aux0: [aux], self.goal: [goal], self.state0:[ state0]}
+    def pi(self, obs, aux, state0, apply_noise=True, compute_Q=True):
+
+        actor_tf = self.actor_tf
+        feed_dict = {self.obs0: [obs], self.aux0: [aux], self.state0:[ state0]}
         if compute_Q:
 
-            action, q = self.sess.run([actor_tf, self.critic_with_actor_tf], feed_dict=feed_dict)
+            action, q, normalized_state = self.sess.run([actor_tf, self.critic_with_actor_tfs[0], self.state0_actor], feed_dict=feed_dict)
 
         else:
-            action = self.sess.run(actor_tf, feed_dict=feed_dict)
+            action, normalized_state = self.sess.run([actor_tf, self.state0_actor], feed_dict=feed_dict)
             q = None
         action = action.flatten()
+        state = denormalize(normalized_state, self.state_rms)
         if self.action_noise is not None and apply_noise:
             noise = self.action_noise()
             assert noise.shape == action.shape
             action += noise
-        action = np.clip(action, self.action_range[0], self.action_range[1])
-        return action, q
 
-    def store_transition(self, state, obs0, action, reward, state1, obs1, terminal1, goal, goalobs, aux0, aux1, demo=False):
+        action = np.clip(action, self.action_range[0], self.action_range[1])
+
+        return action, q, state
+
+    def store_transition(self, state, obs0, action, reward, state1, obs1, terminal1, goal, goalobs, aux0, aux1,i, demo=False):
+        assert goal == None
+        assert goalobs == None
         reward *= self.reward_scale
         if demo:
-            self.memory.append_demonstration(state, obs0, action, reward, state1, obs1, terminal1, goal, goalobs, aux0, aux1)
+            self.memory.append_demonstration(state, obs0, action, reward, state1, obs1, terminal1, goal, goalobs, aux0, aux1,i)
         else:
-            self.memory.append(state, obs0, action, reward, state1, obs1, terminal1, goal, goalobs, aux0, aux1)
+            assert i == None
+            self.memory.append(state, obs0, action, reward, state1, obs1, terminal1, goal, goalobs, aux0, aux1, i)
         if self.normalize_observations:
             self.obs_rms.update(np.array([obs0]))
 
@@ -401,13 +381,12 @@ class DDPG(object):
 
     def train(self, iteration, pretrain=False):
         # Get a batch.
-        batch, n_step_batch, percentage = self.memory.sample_rollout(batch_size=self.batch_size, nsteps=self.nsteps, beta=self.beta, gamma=self.gamma, pretrain=pretrain)
+        batch, n_step_batch, percentage = self.memory.sample_rollout(batch_size=self.batch_size, nsteps=self.nsteps, beta=self.replay_beta, gamma=self.gamma, pretrain=pretrain)
 
         target_Q_1step = self.sess.run(self.target_Q, feed_dict={
             self.obs1: batch['obs1'],
             self.state1: batch['states1'],
             self.aux1: batch['aux1'],
-            self.goal: batch['goals'],
             self.rewards: batch['rewards'],
             self.terminals1: batch['terminals1'].astype('float32'),
             self.nstep_steps: np.ones((self.batch_size, 1)),
@@ -417,20 +396,22 @@ class DDPG(object):
             self.obs1: n_step_batch['obs1'],
             self.state1: n_step_batch['states1'],
             self.aux1: n_step_batch['aux1'],
-            self.goal: n_step_batch['goals'],
             self.rewards: n_step_batch['rewards'],
             self.nstep_steps: n_step_batch['step_reached'],
             self.terminals1: n_step_batch['terminals1'].astype('float32'),
         })
-
+        critic_grads = [None] * self.num_critics
+        critic_losses = [None] * self.num_critics
+        td_errors = [None] * self.num_critics
         # Get all gradients and perform a synced update.
-        ops = [self.actor_grads, self.actor_loss, self.critic_grads, self.critic_loss, self.td_error, self.scalar_summaries]
-        actor_grads, actor_loss, critic_grads, critic_loss, td_errors, scalar_summaries = self.sess.run(ops, feed_dict={
+        ops = [self.actor_grads, self.actor_loss, *self.critic_grads, *self.critic_losses, *self.td_errors, self.scalar_summaries]
+        
+
+        ret = self.sess.run(ops, feed_dict={
             self.obs0: batch['obs0'],
             self.importance_weights: batch['weights'],
             self.state0: batch['states0'],
             self.aux0: batch['aux0'],
-            self.goal: batch['goals'],
             self.actions: batch['actions'],
             self.critic_target: target_Q_1step,
             self.nstep_critic_target: target_Q_nstep,
@@ -439,17 +420,28 @@ class DDPG(object):
             self.memory_size: len(self.memory._storage),
             self.rss: resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         })
-        self.memory.update_priorities(batch['idxes'], td_errors)
-        self.actor_optimizer.update(actor_grads, stepsize=self.actor_lr)
-        self.critic_optimizer.update(critic_grads, stepsize=self.critic_lr)
+        if self.num_critics == 2:
+            actor_grads, actor_loss, critic_grads[0], critic_grads[1], critic_losses[0], critic_losses[1], td_errors[0], td_errors[1], scalar_summaries = ret
+        else:
+            actor_grads, actor_loss, critic_grads[0], critic_losses[0], td_errors[0], scalar_summaries = ret
+        self.memory.update_priorities(batch['idxes'], td_errors[0])
+        for i in range(self.num_critics):
+            self.critic_optimizers[i].update(critic_grads[i], stepsize=self.critic_lr)
         self.writer.add_summary(scalar_summaries, iteration)
-        return critic_loss, actor_loss
+        if iteration % self.policy_and_target_update_period == 0:
+            self.actor_optimizer.update(actor_grads, stepsize=self.actor_lr)
+        return critic_losses[0], actor_loss
 
-    def initialize(self, sess):
+    def set_sess(self, sess):
         self.sess = sess
+
+    def initialize_vars(self):
         self.sess.run(tf.global_variables_initializer())
+
+    def sync_optimizers(self):
         self.actor_optimizer.sync()
-        self.critic_optimizer.sync()
+        for i in range(self.num_critics):
+            self.critic_optimizers[i].sync()
         self.sess.run(self.target_init_updates)
 
     def update_target_net(self):
@@ -460,11 +452,10 @@ class DDPG(object):
             # Get a sample and keep that fixed for all further computations.
             # This allows us to estimate the change in value for the same set of inputs.
             # TODO
-            self.stats_sample = self.memory.sample(batch_size=self.batch_size, beta=0.4)
+            self.stats_sample = self.memory.sample(batch_size=self.batch_size, replay_beta=self.replay_beta)
         values = self.sess.run(self.stats_ops, feed_dict={
             self.obs0: self.stats_sample['obs0'],
             self.actions: self.stats_sample['actions'],
-            self.goal: self.stats_sample['goals'],
             self.aux0: self.stats_sample['aux0'],
             self.state0: self.stats_sample['states0'],
         })
@@ -473,52 +464,22 @@ class DDPG(object):
         assert len(names) == len(values)
         stats = dict(zip(names, values))
 
-        if self.param_noise is not None:
-            stats = {**stats, **self.param_noise.get_stats()}
 
         return stats
-
-    def adapt_param_noise(self):
-        if self.param_noise is None:
-            return 0.
-
-        # Perturb a separate copy of the policy to adjust the scale for the next "real" perturbation.
-        batch = self.memory.sample(batch_size=self.batch_size, beta=0.4)
-        self.sess.run(self.perturb_adaptive_policy_ops, feed_dict={
-            self.param_noise_stddev: self.param_noise.current_stddev,
-        })
-        distance = self.sess.run(self.adaptive_policy_distance, feed_dict={
-            self.obs0: batch['obs0'],
-            self.aux0: batch['aux0'],
-            self.param_noise_stddev: self.param_noise.current_stddev,
-        })
-
-        mean_distance = MPI.COMM_WORLD.allreduce(distance, op=MPI.SUM) / MPI.COMM_WORLD.Get_size()
-        self.param_noise.adapt(mean_distance)
-        return mean_distance
 
     def reset(self):
         # Reset internal state after an episode is complete.
         if self.action_noise is not None:
             self.action_noise.reset()
-        if self.param_noise is not None:
-            self.sess.run(self.perturb_policy_ops, feed_dict={
-                self.param_noise_stddev: self.param_noise.current_stddev,
-            })
-
-
-
 
     def write_summary(self, summary):
         agent_summary = {
             "gamma" : self.gamma,
             "tau" : self.tau,
             "normalize_observations" : self.normalize_observations,
-            "normalize_returns" : self.normalize_returns,
             "normalize_state" : self.normalize_state,
             "normalize_aux" : self.normalize_aux,
             "action_noise" : self.action_noise,
-            "param_noise" : self.param_noise,
             "action_range" : self.action_range,
             "return_range" : self.return_range,
             "observation_range" : self.observation_range,
@@ -533,9 +494,14 @@ class DDPG(object):
             "lambda_nstep" : self.lambda_nstep,
             "lambda_1step" : self.lambda_1step,
             "nsteps" : self.nsteps,
-            "beta" : self.beta,
+            "replay_beta" : self.replay_beta,
             "run_name" : self.run_name,
             "lambda_pretrain" : self.lambda_pretrain,
+            "target_policy_noise" : self.target_policy_noise,
+            "target_policy_noise_clip" : self.target_policy_noise_clip,
+            "lambda_state_predict" : self.lambda_state_predict,
+
+
         }
         summary["agent_summary"] = agent_summary
         md_string = self._markdownize_summary(summary)

@@ -91,8 +91,7 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                     while not done:
                         aux0 = env.get_aux()
                         state = env.state()
-                        goal = env.goalstate()
-                        action, q = agent.pi(obs, aux0, goal, state, apply_noise=False, compute_Q=True)
+                        action, q = agent.pi(obs, aux0, state, apply_noise=False, compute_Q=True)
                         obs, r, done, info = env.step(action)
                         env.render()
                         total_r += r
@@ -128,8 +127,6 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
 
 
 
-        goal = env.goalstate()
-        goal_obs = env.goalobs()
         agent.memory.demonstrationsDone()
 
         iteration = 0
@@ -156,7 +153,7 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                     aux0 = env.get_aux()
                     state =  env.get_state()
 
-                    action, q = agent.pi(obs, aux0, goal, state, apply_noise=True, compute_Q=True)
+                    action, q = agent.pi(obs, aux0, state, apply_noise=True, compute_Q=True)
                     assert action.shape == env.action_space.shape
 
                     # Execute next action.
@@ -178,7 +175,7 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
 
 
 
-                    agent.store_transition(state, obs, action, r, state1, new_obs, done, goal, goal_obs, aux0, aux1)
+                    agent.store_transition(state, obs, action, r, state1, new_obs, done, None, None, aux0, aux1)
                     obs = new_obs
 
                     if done:
@@ -208,8 +205,7 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                             obs = env.reset()
 
 
-                        goal = env.goalstate()
-                        goal_obs = env.goalobs()
+ 
 
 
                 # Train.
@@ -240,7 +236,7 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                     for t_rollout in range(nb_eval_steps):
                         aux = eval_env.get_aux()
                         state = eval_env.get_state()
-                        eval_action, eval_q = agent.pi(eval_obs, aux, goal, state, apply_noise=False, compute_Q=True)
+                        eval_action, eval_q = agent.pi(eval_obs, aux, state, apply_noise=False, compute_Q=True)
                         eval_obs, eval_r, eval_done, eval_info = eval_env.step(max_action * eval_action)  # scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
                         if render_eval:
                             frame = eval_env.render(mode="rgb_array")
@@ -329,8 +325,7 @@ def _initialize_memory_with_policy(agent, demo_policy, demo_env,render_demo, num
      
     obs0 = demo_env.reset()
     demo_policy.reset()
-    goal = demo_env.goalstate()
-    goal_obs = demo_env.goalobs()
+
     os.makedirs(demo_states_dir+"/"+run_name, exist_ok=True)
 
     if render_demo:
@@ -346,7 +341,7 @@ def _initialize_memory_with_policy(agent, demo_policy, demo_env,render_demo, num
         obs1, r, done, info = demo_env.step(action)
         aux1 = demo_env.get_aux()
         state1 = demo_env.get_state()
-        agent.store_transition(state0, obs0, action, r, state1, obs1, done, goal, goal_obs, aux0, aux1, demo=True)
+        agent.store_transition(state0, obs0, action, r, state1, obs1, done, None, None, aux0, aux1, demo=True)
 
         obs0 = obs1
         if render_demo:
@@ -357,8 +352,6 @@ def _initialize_memory_with_policy(agent, demo_policy, demo_env,render_demo, num
         if done:
             obs0 = demo_env.reset()
             demo_policy.reset()
-            goal = demo_env.goalstate()
-            goal_obs = demo_env.goalobs()
     if render_demo:
         rgb.release()
         uploadToDrive(run_name, "demo.avi", fname, delete=True)
