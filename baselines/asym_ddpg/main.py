@@ -128,7 +128,6 @@ def parse_args():
     parser.add_argument('--noise-type', type=str, default='normal_0.2')  # choices are ou_xx, normal_xx, none
     parser.add_argument('--load-file', type=str, default='')  # choices are adaptive-param_xx, ou_xx, normal_xx, none
     parser.add_argument('--save-folder', type=str, default='')  # choices are adaptive-param_xx, ou_xx, normal_xx, none
-
     parser.add_argument('--num-timesteps', type=int, default=None)
     parser.add_argument('--num-demo-steps', type=int, default=20)
     parser.add_argument('--num-pretrain-steps', type=int, default=2000)
