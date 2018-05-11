@@ -12,12 +12,12 @@ import tensorflow as tf
 from mpi4py import MPI
 import cv2
 from drive_util import uploadToDrive
-PATH = "/tmp/model.ckpt"
 from pathlib import Path
-demo_states_dir = "/tmp/jm6214/demo_states"
+home = str(Path.home())
+
+demo_states_dir = home + "/tmp/jm6214/demo_states"
 demo_states_template = demo_states_dir+ "/{}/{}.bullet"
 
-home = str(Path.home())
 @profile
 def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, param_noise, actor, critic,
     normalize_returns, normalize_observations, normalize_aux, critic_l2_reg, actor_lr, critic_lr, action_noise,

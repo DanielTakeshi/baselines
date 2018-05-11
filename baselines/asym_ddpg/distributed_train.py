@@ -16,12 +16,13 @@ import micoenv
 import sys
 
 from drive_util import uploadToDrive
-PATH = "/tmp/model.ckpt"
 from pathlib import Path
-demo_states_dir = "/tmp/jm6214/demo_states"
+
+home = str(Path.home())
+
+demo_states_dir = home+"/tmp/jm6214/demo_states"
 demo_states_template = demo_states_dir+ "/{}/{}.bullet"
 from threading import Thread
-home = str(Path.home())
 
 
 class Renderer(object):
@@ -177,10 +178,25 @@ class DistributedTrain(object):
                     total_r = 0
                     while not done:
                         aux0 = self.eval_env.get_aux()
-                        state = self.eval_env.get_state()
-                        action, q, state = self.agent.pi(obs, aux0, state, apply_noise=False, compute_Q=True)
+                        state0 = self.eval_env.get_state()
+                        action, q, state = self.agent.pi(obs, aux0, state0, apply_noise=False, compute_Q=True)
+
+                        self.eval_env.clearDebugText()
+                        def preprocess(pos):
+                            return np.clip(pos, [-1,-1,-1], [1,1,1])
+                        self.eval_env.renderDebugText("grip", preprocess(state[0][0:3]),textColorRGB= [1,0,0])
+                        self.eval_env.renderDebugText("actual_grip", preprocess(aux0[10:13]),textColorRGB= [0,0,0])
+                        self.eval_env.renderDebugText("cube", preprocess(state[0][8:11]),textColorRGB= [0,1,0])
+                        self.eval_env.renderDebugText("target", preprocess(state[0][3:6]),textColorRGB= [0,0,1])
+                        self.eval_env.renderDebugText("grip2", preprocess(state[0][14:17]),textColorRGB= [0,0,1])
+
+
+
                         obs, r, done, info = self.eval_env.step(action)
+
                         self.eval_env.render()
+
+
                         total_r += r
                     print(total_r)
                 return
