@@ -16,12 +16,13 @@ import micoenv
 import sys
 
 from drive_util import uploadToDrive
-PATH = "/tmp/model.ckpt"
 from pathlib import Path
-demo_states_dir = "/tmp/jm6214/demo_states"
+
+home = str(Path.home())
+
+demo_states_dir = home+"/tmp/jm6214/demo_states"
 demo_states_template = demo_states_dir+ "/{}/{}.bullet"
 from threading import Thread
-home = str(Path.home())
 
 
 class Renderer(object):
