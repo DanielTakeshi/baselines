@@ -248,23 +248,26 @@ class DistributedTrain(object):
             eval_qs = []
             if self.render_eval:
                 renderer = Renderer("eval", self.run_name, epoch)
-            for t_rollout in range(self.nb_eval_steps):
-                print ("Evaluation {}/{}".format(t_rollout, self.nb_eval_steps), end="\r")
-                eval_action, eval_q, state = self.agent.pi(eval_obs0, aux0, state0, apply_noise=False, compute_Q=True)
-                eval_obs0, eval_r, eval_done, eval_info = self.eval_env.step( eval_action)
-                aux0, state0 = self.eval_env.get_aux(), self.eval_env.get_state()
-                eval_qs.append(eval_q)
+            for eval_episode in range(self.nb_eval_steps):
 
-                if self.render_eval:
-                    frame = self.eval_env.render(mode="rgb_array")
-                    renderer.record_frame(frame, eval_r)
-                eval_episode_reward += eval_r
-                if eval_done:
-                    eval_obs0, aux0, state0 = self.eval_env.reset(), self.eval_env.get_aux(), self.eval_env.get_state()
-                    eval_episode_rewards.append(eval_episode_reward)
-                    self.agent.save_eval_reward(eval_episode_reward, eval_episodes)
-                    eval_episodes += 1
-                    eval_episode_reward = 0.
+                eval_done = False
+                print ("Evaluation {}/{}".format(eval_episode, self.nb_eval_steps), end="\r")
+                while not eval_done:
+                    eval_action, eval_q, state = self.agent.pi(eval_obs0, aux0, state0, apply_noise=False, compute_Q=True)
+                    eval_obs0, eval_r, eval_done, eval_info = self.eval_env.step( eval_action)
+                    aux0, state0 = self.eval_env.get_aux(), self.eval_env.get_state()
+                    eval_qs.append(eval_q)
+
+                    if self.render_eval:
+                        frame = self.eval_env.render(mode="rgb_array")
+                        renderer.record_frame(frame, eval_r)
+                    eval_episode_reward += eval_r
+                
+                eval_obs0, aux0, state0 = self.eval_env.reset(), self.eval_env.get_aux(), self.eval_env.get_state()
+                eval_episode_rewards.append(eval_episode_reward)
+                self.agent.save_eval_reward(eval_episode_reward, eval_episodes)
+                eval_episodes += 1
+                eval_episode_reward = 0.
 
             if self.render_eval:
                 renderer.finalize_and_upload()

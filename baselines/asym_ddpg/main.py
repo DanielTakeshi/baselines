@@ -123,7 +123,7 @@ def parse_args():
     parser.add_argument('--nb-epochs', type=int, default=500)  # with default settings, perform 1M steps total
     parser.add_argument('--nb-epoch-cycles', type=int, default=20)
     parser.add_argument('--nb-train-steps', type=int, default=50)  # per epoch cycle and MPI worker
-    parser.add_argument('--nb-eval-steps', type=int, default=400)  # per epoch cycle and MPI worker
+    parser.add_argument('--nb-eval-steps', type=int, default=2)  # per epoch cycle and MPI worker
     parser.add_argument('--nb-rollout-steps', type=int, default=100)  # per epoch cycle and MPI worker
     parser.add_argument('--noise-type', type=str, default='normal_0.2')  # choices are ou_xx, normal_xx, none
     parser.add_argument('--load-file', type=str, default='')  # choices are adaptive-param_xx, ou_xx, normal_xx, none
@@ -149,7 +149,7 @@ def parse_args():
     parser.add_argument('--demo-terminality', type=int, default=5)
     parser.add_argument('--replay-alpha', type=float, default=0.8)
     parser.add_argument('--demo-epsilon', type=float, default=0.2)
-    parser.add_argument('--lambda-state-predict-loss', type=float, default=1.0)
+    parser.add_argument('--lambda-state-predict', type=float, default=1.0)
 
     boolean_flag(parser, 'positive-reward', default=True)
     boolean_flag(parser, 'only-eval', default=False)
