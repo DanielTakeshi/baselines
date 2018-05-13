@@ -18,7 +18,7 @@ from mpi4py import MPI
 import micoenv
 import learning.demo_policies as demo
 
-def run(env_id, eval_env_id, seed, noise_type, evaluation,demo_policy,use_velocities, num_dense_layers, dense_layer_size, layer_norm,demo_epsilon,replay_alpha, **kwargs):
+def run(env_id, eval_env_id, seed, noise_type, evaluation,demo_policy,use_velocities, num_dense_layers, dense_layer_size, layer_norm,demo_epsilon,replay_alpha,conv_size, **kwargs):
     # Configure things.
     if use_velocities:
         assert "velos" in env_id
@@ -67,7 +67,7 @@ def run(env_id, eval_env_id, seed, noise_type, evaluation,demo_policy,use_veloci
     memory = PrioritizedMemory(limit=int(1e4 * 5), alpha=replay_alpha, demo_epsilon=demo_epsilon)
 
     critic = Critic(num_dense_layers, dense_layer_size, layer_norm)
-    actor = Actor(nb_actions, env.state_space.shape[0], num_dense_layers, dense_layer_size, layer_norm)
+    actor = Actor(nb_actions, env.state_space.shape[0], num_dense_layers, dense_layer_size, layer_norm, conv_size=conv_size)
 
     # Seed everything to make things reproducible.
     seed = seed + 1000000 * rank
@@ -128,6 +128,7 @@ def parse_args():
     parser.add_argument('--noise-type', type=str, default='normal_0.2')  # choices are ou_xx, normal_xx, none
     parser.add_argument('--load-file', type=str, default='')  # choices are adaptive-param_xx, ou_xx, normal_xx, none
     parser.add_argument('--save-folder', type=str, default='')  # choices are adaptive-param_xx, ou_xx, normal_xx, none
+    parser.add_argument('--conv-size', type=str, default='small')  
     parser.add_argument('--num-timesteps', type=int, default=None)
     parser.add_argument('--num-demo-steps', type=int, default=20)
     parser.add_argument('--num-pretrain-steps', type=int, default=2000)
@@ -149,7 +150,7 @@ def parse_args():
     parser.add_argument('--demo-terminality', type=int, default=5)
     parser.add_argument('--replay-alpha', type=float, default=0.8)
     parser.add_argument('--demo-epsilon', type=float, default=0.2)
-    parser.add_argument('--lambda-state-predict', type=float, default=1.0)
+    parser.add_argument('--lambda-state-predict', type=float, default=1000.0)
 
     boolean_flag(parser, 'positive-reward', default=True)
     boolean_flag(parser, 'only-eval', default=False)

@@ -14,13 +14,13 @@ import cv2
 import gym
 import micoenv
 import sys
-
+from baselines.common.schedules import LinearSchedule
 from drive_util import uploadToDrive
 from pathlib import Path
 
 home = str(Path.home())
 
-demo_states_dir = home+"/tmp/jm6214/demo_states"
+demo_states_dir = "/vol/bitbucket/jm6214"+"/demo_states"
 demo_states_template = demo_states_dir+ "/{}/{}.bullet"
 from threading import Thread
 
@@ -46,9 +46,9 @@ class Renderer(object):
 
 ##### Stuff to be done in workers ########
 class RolloutWorker(object):
-    def __init__(self, env_id, agent, num_steps, run_name, reset_to_demo_rate, seed,demo_terminality):
+    def __init__(self, env_id, agent, num_steps, run_name, reset_to_demo_rate_sched, seed,demo_terminality):
         self.num_steps = num_steps
-        self.reset_to_demo_rate = reset_to_demo_rate
+        self.reset_to_demo_rate_sched = reset_to_demo_rate_sched
         self.advance_epoch()
         self.run_name = run_name
         self.agent = agent
@@ -101,7 +101,7 @@ class RolloutWorker(object):
                     episodes += 1
                     self.epoch_rewards.append(episode_reward)
                     episode_reward = 0.
-                    if np.random.uniform(0, 1) < self.reset_to_demo_rate:
+                    if np.random.uniform(0, 1) < self.reset_to_demo_rate_sched.value(self.num_steps):
                         while (True):
                             memory = self.agent.memory
 
@@ -146,7 +146,7 @@ class DistributedTrain(object):
         self.demo_policy = demo_policy
         self.render_demo = render_demo
         self.num_demo_steps = num_demo_steps
-        self.reset_to_demo_rate = reset_to_demo_rate
+        self.reset_to_demo_rate = reset_to_demo_rate 
         self.demo_terminality = demo_terminality
 
 
@@ -217,7 +217,7 @@ class DistributedTrain(object):
         num_steps = self.nb_epochs * self.nb_epoch_cycles * self.nb_rollout_steps
         rws = []
         for i in range(1):
-            rw = RolloutWorker(self.env_id, self.agent, num_steps,self.run_name, self.reset_to_demo_rate, i, self.demo_terminality)
+            rw = RolloutWorker(self.env_id, self.agent, num_steps,self.run_name, LinearSchedule(5e5, self.reset_to_demo_rate, 0.1), i, self.demo_terminality)
             thread = Thread(target = rw.exec_rollouts, daemon=True)
             thread.start()
             rws.append(rw)

@@ -36,23 +36,25 @@ class Actor(Model):
                 scope.reuse_variables()
             x = obs
             if len(obs.shape) > 2:
+                normalizer_fn = tc.layers.layer_norm if self.layer_norm else None                
                 if self.conv_size == 'small':
-                    x = tc.layers.conv2d(x, 32, kernel_size=(3, 3), stride=2, normalizer_fn=tc.layers.layer_norm)
-                    x = tc.layers.conv2d(x, 32, kernel_size=(3, 3), stride=2, normalizer_fn=tc.layers.layer_norm)
-                    x = tc.layers.conv2d(x, 32, kernel_size=(3, 3), stride=2, normalizer_fn=tc.layers.layer_norm)
-                    x = tc.layers.conv2d(x, 32, kernel_size=(3, 3), stride=2, normalizer_fn=tc.layers.layer_norm)                    
+                    x = tc.layers.conv2d(x, 32, kernel_size=(3, 3), stride=2, normalizer_fn=normalizer_fn)
+                    x = tc.layers.conv2d(x, 32, kernel_size=(3, 3), stride=2, normalizer_fn=normalizer_fn)
+                    x = tc.layers.conv2d(x, 32, kernel_size=(3, 3), stride=2, normalizer_fn=normalizer_fn)
+                    x = tc.layers.conv2d(x, 32, kernel_size=(3, 3), stride=2, normalizer_fn=normalizer_fn)                    
                 elif self.conv_size == 'large':
-                    x = tc.layers.conv2d(x, 32, kernel_size=(8,8), stride=4, normalizer_fn=tc.layers.layer_norm)
-                    x = tc.layers.conv2d(x, 32, kernel_size=(4, 4), stride=2, normalizer_fn=tc.layers.layer_norm)
-                    x = tc.layers.conv2d(x, 32, kernel_size=(3, 3), stride=1, normalizer_fn=tc.layers.layer_norm)
-                    x = tc.layers.conv2d(x, 32, kernel_size=(3, 3), stride=1, normalizer_fn=tc.layers.layer_norm)
+                    x = tc.layers.conv2d(x, 32, kernel_size=(8, 8), stride=4, normalizer_fn=normalizer_fn)
+                    x = tc.layers.conv2d(x, 32, kernel_size=(4, 4), stride=2, normalizer_fn=normalizer_fn)
+                    x = tc.layers.conv2d(x, 32, kernel_size=(3, 3), stride=1, normalizer_fn=normalizer_fn)
+                    x = tc.layers.conv2d(x, 32, kernel_size=(3, 3), stride=1, normalizer_fn=normalizer_fn)
                 else:
                     raise('Unknow size')
                 x = tf.layers.flatten(x)
             x = tf.concat([x, aux], axis=-1)
             for i in range(self.num_dense_layers):
                 x = tf.layers.dense(x, self.dense_layer_size)
-                x = tc.layers.layer_norm(x, center=True, scale=True)
+                if self.layer_norm:
+                    x = tc.layers.layer_norm(x, center=True, scale=True)
                 x = tf.nn.relu(x)
             x = tf.layers.dense(x, self.nb_actions + self.n_state, kernel_initializer=tf.random_uniform_initializer(minval=-3e-3, maxval=3e-3))
             pi, state = tf.split(x, [self.nb_actions, self.n_state], 1)
