@@ -150,7 +150,7 @@ def parse_args():
     parser.add_argument('--demo-terminality', type=int, default=5)
     parser.add_argument('--replay-alpha', type=float, default=0.8)
     parser.add_argument('--demo-epsilon', type=float, default=0.2)
-    parser.add_argument('--lambda-state-predict', type=float, default=1.0)
+    parser.add_argument('--lambda-state-predict', type=float, default=1000.0)
 
     boolean_flag(parser, 'positive-reward', default=True)
     boolean_flag(parser, 'only-eval', default=False)
