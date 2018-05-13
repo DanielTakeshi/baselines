@@ -300,7 +300,7 @@ class DDPG(object):
         self.r_plot = tf.summary.scalar("returns", self.r_plot_in)
         self.r_plot_in_eval = tf.placeholder(tf.float32, name='r_plot_in_eval')
         self.r_plot_eval = tf.summary.scalar("returns_eval", self.r_plot_in_eval)
-        self.writer = tf.summary.FileWriter(home + '/aux_predict/'+ self.run_name, graph=tf.get_default_graph())
+        self.writer = tf.summary.FileWriter(home + '/pusher_search_summaries/'+ self.run_name, graph=tf.get_default_graph())
 
 
     def save_reward(self, r):
