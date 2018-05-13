@@ -191,10 +191,13 @@ class DistributedTrain(object):
                         self.eval_env.renderDebugText("grip2", preprocess(state[0][14:17]),textColorRGB= [0,0,1])
 
 
-
-                        obs, r, done, info = self.eval_env.step(action)
-
-                        self.eval_env.render()
+                        try:
+                            obs, r, done, info = self.eval_env.step(action)
+                            self.eval_env.render()
+                        except StopIteration:
+                            print ("interrupted iteration")
+                            done = True
+                       
 
 
                         total_r += r
