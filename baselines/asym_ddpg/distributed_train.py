@@ -83,7 +83,7 @@ class RolloutWorker(object):
                     self.renderer.finalize_and_upload()
                     self.renderer = None
 
-                action, q, state = self.agent.pi(obs0, aux0, state0, apply_noise=True, compute_Q=True)
+                action, q, _, _, _ = self.agent.pi(obs0, aux0, state0, apply_noise=True, compute_Q=True)
                 self.epoch_qs.append(q)
                 assert action.shape == env.action_space.shape
                 obs1, r, done, info = env.step(action)
@@ -179,7 +179,7 @@ class DistributedTrain(object):
                     while not done:
                         aux0 = self.eval_env.get_aux()
                         state0 = self.eval_env.get_state()
-                        action, q, state = self.agent.pi(obs, aux0, state0, apply_noise=False, compute_Q=True)
+                        action, q, _, _, _ = self.agent.pi(obs, aux0, state0, apply_noise=False, compute_Q=True)
 
                         self.eval_env.clearDebugText()
                         def preprocess(pos):
@@ -257,7 +257,7 @@ class DistributedTrain(object):
                 eval_done = False
                 print ("Evaluation {}/{}".format(eval_episode, self.nb_eval_steps), end="\r")
                 while not eval_done:
-                    eval_action, eval_q, state = self.agent.pi(eval_obs0, aux0, state0, apply_noise=False, compute_Q=True)
+                    eval_action, eval_q, _, _, _ = self.agent.pi(eval_obs0, aux0, state0, apply_noise=False, compute_Q=True)
                     eval_obs0, eval_r, eval_done, eval_info = self.eval_env.step( eval_action)
                     aux0, state0 = self.eval_env.get_aux(), self.eval_env.get_state()
                     eval_qs.append(eval_q)
