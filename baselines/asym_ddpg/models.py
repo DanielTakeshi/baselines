@@ -51,16 +51,33 @@ class Actor(Model):
                     raise('Unknow size')
                 x = tf.layers.flatten(x)
             x = tf.concat([x, aux], axis=-1)
-            for i in range(self.num_dense_layers):
-                x = tf.layers.dense(x, self.dense_layer_size)
-                if self.layer_norm:
-                    x = tc.layers.layer_norm(x, center=True, scale=True)
-                x = tf.nn.relu(x)
-            x = tf.layers.dense(x, self.nb_actions + self.n_state, kernel_initializer=tf.random_uniform_initializer(minval=-3e-3, maxval=3e-3))
-            pi, state = tf.split(x, [self.nb_actions, self.n_state], 1)
 
-            pi = tf.nn.tanh(pi)
-        return pi, state
+            x = tf.layers.dense(x, self.dense_layer_size)
+            if self.layer_norm:
+                x = tc.layers.layer_norm(x, center=True, scale=True)
+            x = tf.nn.relu(x)
+
+            x = tf.layers.dense(x, self.dense_layer_size + 9)
+            actor_lay, cube, gripper, target = tf.split(x, [self.dense_layer_size, 3,3,3], 1)
+            
+            if self.layer_norm:
+                actor_lay = tc.layers.layer_norm(actor_lay, center=True, scale=True)
+            x = tf.nn.relu(actor_lay)
+           
+            x = tf.layers.dense(x, self.dense_layer_size)
+            if self.layer_norm:
+                x = tc.layers.layer_norm(x, center=True, scale=True)
+            x = tf.nn.relu(x)
+
+            x = tf.layers.dense(x, self.dense_layer_size)
+            if self.layer_norm:
+                x = tc.layers.layer_norm(x, center=True, scale=True)
+            x = tf.nn.relu(x)
+            x = tf.layers.dense(x, self.nb_actions, kernel_initializer=tf.random_uniform_initializer(minval=-3e-3, maxval=3e-3))
+            pi = tf.nn.tanh(x)
+
+
+        return pi, cube, gripper, target
 
 
 class Critic(Model):
