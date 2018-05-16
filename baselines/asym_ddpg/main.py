@@ -9,7 +9,7 @@ from baselines.common.misc_util import (
 )
 import baselines.asym_ddpg.distributed_train as training
 from baselines.asym_ddpg.models import Actor, Critic
-from baselines.asym_ddpg.prioritized_memory import PrioritizedMemory
+from baselines.asym_ddpg.prioritized_memory import Memory
 from baselines.asym_ddpg.noise import *
 import sys
 import gym
@@ -64,7 +64,7 @@ def run(env_id, eval_env_id, seed, noise_type, evaluation,demo_policy,use_veloci
 
     #TODO:
 
-    memory = PrioritizedMemory(limit=int(1e4 * 5), alpha=replay_alpha, demo_epsilon=demo_epsilon)
+    memory = Memory(limit=int(1e4 * 5))
 
     critic = Critic(num_dense_layers, dense_layer_size, layer_norm)
     actor = Actor(nb_actions, env.state_space.shape[0], num_dense_layers, dense_layer_size, layer_norm, conv_size=conv_size)
@@ -100,7 +100,7 @@ def run(env_id, eval_env_id, seed, noise_type, evaluation,demo_policy,use_veloci
 def parse_args():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-    parser.add_argument('--env-id', type=str, default='MicoEnv-grabber-dense-v1')
+    parser.add_argument('--env-id', type=str, default='MicoEnv-pusher_fix-pixels-sparse-ik-acton-v1')
     parser.add_argument('--eval-env-id', type=str, default='')
     boolean_flag(parser, 'render-eval', default=True)
     boolean_flag(parser, 'render-demo', default=True)
@@ -132,8 +132,8 @@ def parse_args():
     parser.add_argument('--num-timesteps', type=int, default=None)
     parser.add_argument('--num-demo-steps', type=int, default=20)
     parser.add_argument('--num-pretrain-steps', type=int, default=2000)
-    parser.add_argument('--run-name', type=str, default='')
-    parser.add_argument('--demo-policy', type=str, default='None')
+    parser.add_argument('--run-name', type=str, default='ignore')
+    parser.add_argument('--demo-policy', type=str, default='pusher')
     parser.add_argument('--lambda-pretrain', type=float, default=5.0)
     parser.add_argument('--lambda-nstep', type=float, default=0.5)
     parser.add_argument('--lambda-1step', type=float, default=1.0)
