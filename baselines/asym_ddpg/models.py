@@ -58,13 +58,14 @@ class Actor(Model):
             x = tf.nn.relu(x)
 
             x = tf.layers.dense(x, self.dense_layer_size + 9)
-            actor_lay, cube, gripper, target = tf.split(x, [self.dense_layer_size, 3,3,3], 1)
+            x, cube, target = tf.split(x, [self.dense_layer_size, 3,3], 1)
             
             if self.layer_norm:
-                actor_lay = tc.layers.layer_norm(actor_lay, center=True, scale=True)
-            x = tf.nn.relu(actor_lay)
-           
-            x = tf.layers.dense(x, self.dense_layer_size)
+                x = tc.layers.layer_norm(x, center=True, scale=True)
+            x = tf.nn.relu(x)
+
+            x = tf.layers.dense(x, self.dense_layer_size + 3)
+            x, gripper = tf.split(x, [self.dense_layer_size, 3], 1)
             if self.layer_norm:
                 x = tc.layers.layer_norm(x, center=True, scale=True)
             x = tf.nn.relu(x)
