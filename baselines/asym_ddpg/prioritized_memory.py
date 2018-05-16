@@ -79,7 +79,7 @@ class Memory(object):
             result = {k: array_min2d(v) for k, v in batches.items()}
             return result
     
-    def sample(self):
+    def sample(self,batch_size):
         with self.lock:
             idxes = np.random.random_integers(low=0, high=self.nb_entries - 1, size=batch_size)
             demos = [i < self._num_demonstrations for i in idxes]
@@ -94,7 +94,7 @@ class Memory(object):
         with self.lock:
             self._adding_demonstrations = False
 
-    def sample_rollout(self, batch_size, nsteps, beta, gamma):
+    def sample_rollout(self, batch_size, nsteps, beta, gamma, pretrain=False):
         with self.lock:
             batches = self.sample(batch_size)
             n_step_batches = {storable_element: [] for storable_element in self.storable_elements}
