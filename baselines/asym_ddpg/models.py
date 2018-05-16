@@ -57,7 +57,7 @@ class Actor(Model):
                 x = tc.layers.layer_norm(x, center=True, scale=True)
             x = tf.nn.relu(x)
 
-            x = tf.layers.dense(x, self.dense_layer_size + 9)
+            x = tf.layers.dense(x, self.dense_layer_size + 6)
             x, cube, target = tf.split(x, [self.dense_layer_size, 3,3], 1)
             
             if self.layer_norm:
