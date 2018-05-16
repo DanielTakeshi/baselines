@@ -157,8 +157,8 @@ class PrioritizedMemory(Memory):
             idx = self._next_idx
             if not super().append(*args, **kwargs):
               return
-            self._it_sum[idx] = self._max_priority ** self._alpha
-            self._it_min[idx] = self._max_priority ** self._alpha
+            self._it_sum[idx] = self._max_priority 
+            self._it_min[idx] = self._max_priority 
 
     def append_demonstration(self, *args, **kwargs):
         with self.lock:
@@ -166,8 +166,8 @@ class PrioritizedMemory(Memory):
             idx = self._next_idx
             if not super().append(*args, **kwargs, count=False):
               return
-            self._it_sum[idx] = self._max_priority ** self._alpha
-            self._it_min[idx] = self._max_priority ** self._alpha
+            self._it_sum[idx] = self._max_priority 
+            self._it_min[idx] = self._max_priority 
             self._num_demonstrations += 1
 
 
