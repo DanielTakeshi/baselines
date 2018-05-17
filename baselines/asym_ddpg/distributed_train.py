@@ -179,16 +179,17 @@ class DistributedTrain(object):
                     while not done:
                         aux0 = self.eval_env.get_aux()
                         state0 = self.eval_env.get_state()
-                        action, q, _, _, _ = self.agent.pi(obs, aux0, state0, apply_noise=False, compute_Q=True)
+                        action, q, cube, gripper, target = self.agent.pi(obs, aux0, state0, apply_noise=False, compute_Q=True)
 
                         self.eval_env.clearDebugText()
                         def preprocess(pos):
-                            return np.clip(pos, [-1,-1,-1], [1,1,1])
-                        self.eval_env.renderDebugText("grip", preprocess(state[0][0:3]),textColorRGB= [1,0,0])
+                            return np.clip(pos.reshape((3,)), [-1,-1,-1], [1,1,1])
+                        print (cube, gripper, target)
+
+                        self.eval_env.renderDebugText("grip", preprocess(gripper),textColorRGB= [1,0,0])
                         self.eval_env.renderDebugText("actual_grip", preprocess(aux0[10:13]),textColorRGB= [0,0,0])
-                        self.eval_env.renderDebugText("cube", preprocess(state[0][8:11]),textColorRGB= [0,1,0])
-                        self.eval_env.renderDebugText("target", preprocess(state[0][3:6]),textColorRGB= [0,0,1])
-                        self.eval_env.renderDebugText("grip2", preprocess(state[0][14:17]),textColorRGB= [0,0,1])
+                        self.eval_env.renderDebugText("cube", preprocess(cube),textColorRGB= [0,1,0])
+                        self.eval_env.renderDebugText("target", preprocess(target),textColorRGB= [0,0,1])
 
 
                         try:
