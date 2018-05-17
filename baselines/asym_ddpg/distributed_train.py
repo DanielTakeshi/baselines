@@ -20,7 +20,7 @@ from pathlib import Path
 
 home = str(Path.home())
 
-demo_states_dir = "/vol/bitbucket/jm6214"+"/demo_states"
+demo_states_dir = home+"/demo_states"
 demo_states_template = demo_states_dir+ "/{}/{}.bullet"
 from threading import Thread
 
@@ -120,7 +120,7 @@ class RolloutWorker(object):
                     aux0, state0 = env.get_aux(), env.get_state()
                     
 class DistributedTrain(object):
-    def __init__(self, run_name, agent, env, nb_rollout_steps, num_pretrain_steps, nb_epochs, nb_epoch_cycles, nb_train_steps, demo_env, demo_policy, render_demo, num_demo_steps, reset_to_demo_rate, render_eval, eval_env, nb_eval_steps, env_id, policy_and_target_update_period, demo_terminality, load_file, save_folder, only_eval):
+    def __init__(self, run_name, agent, env, nb_rollout_steps, num_pretrain_steps, nb_epochs, nb_epoch_cycles, nb_train_steps, demo_env, demo_policy, render_demo, num_demo_steps, reset_to_demo_rate, render_eval, eval_env, nb_eval_steps, env_id, policy_and_target_update_period, demo_terminality, load_file, save_folder, only_eval, cloth):
         # Misc params
         self.run_name = run_name
         self.agent = agent
@@ -128,6 +128,7 @@ class DistributedTrain(object):
         self.save_folder = save_folder
         self.only_eval = only_eval
         self.saver = tf.train.Saver()
+        self.cloth = cloth
 
         # Main rollout params
         self.nb_rollout_steps = nb_rollout_steps
@@ -179,16 +180,16 @@ class DistributedTrain(object):
                     while not done:
                         aux0 = self.eval_env.get_aux()
                         state0 = self.eval_env.get_state()
-                        action, q, cube, gripper, target = self.agent.pi(obs, aux0, state0, apply_noise=False, compute_Q=True)
+                        action, q, object_conf, gripper, target = self.agent.pi(obs, aux0, state0, apply_noise=False, compute_Q=True)
 
                         self.eval_env.clearDebugText()
                         def preprocess(pos):
                             return np.clip(pos.reshape((3,)), [-1,-1,-1], [1,1,1])
-                        print (cube, gripper, target)
+                        print (object_conf, gripper, target)
 
                         self.eval_env.renderDebugText("grip", preprocess(gripper),textColorRGB= [1,0,0])
                         self.eval_env.renderDebugText("actual_grip", preprocess(state0[0:3]),textColorRGB= [0,0,0])
-                        self.eval_env.renderDebugText("cube", preprocess(cube),textColorRGB= [0,1,0])
+                        self.eval_env.renderDebugText("object_conf", preprocess(object_conf),textColorRGB= [0,1,0])
                         self.eval_env.renderDebugText("target", preprocess(target),textColorRGB= [0,0,1])
 
 
@@ -258,7 +259,7 @@ class DistributedTrain(object):
                 eval_done = False
                 print ("Evaluation {}/{}".format(eval_episode, self.nb_eval_steps), end="\r")
                 while not eval_done:
-                    eval_action, eval_q, cube, gripper, target = self.agent.pi(eval_obs0, aux0, state0, apply_noise=False, compute_Q=True)
+                    eval_action, eval_q, object_conf, gripper, target = self.agent.pi(eval_obs0, aux0, state0, apply_noise=False, compute_Q=True)
                     eval_obs0, eval_r, eval_done, eval_info = self.eval_env.step( eval_action)
                     aux0, state0 = self.eval_env.get_aux(), self.eval_env.get_state()
                     eval_qs.append(eval_q)
@@ -267,13 +268,17 @@ class DistributedTrain(object):
                         frame = self.eval_env.render(mode="rgb_array")
                         renderer.record_frame(frame, eval_r)
                     eval_episode_reward += eval_r
+                    if self.cloth:
+                        actual_object_conf = state0[5:17]
+                        actual_grip = state0[0:3]
+                        actual_target = 0                       
+                    else:
+                        actual_object_conf = state0[8:11]
+                        actual_grip = state0[0:3]
+                        actual_target = state0[3:6]
 
-                    actual_cube = state0[8:11]
-                    actual_grip = state0[0:3]
-                    actual_target = state0[3:6]
-
-                    diff_cube, diff_grip, diff_target = np.linalg.norm(actual_cube - cube), np.linalg.norm(actual_grip - gripper), np.linalg.norm(actual_target - target)
-                    self.agent.save_aux_prediction(diff_cube, diff_grip, diff_target)
+                    diff_object_conf, diff_grip, diff_target = np.linalg.norm(actual_object_conf - object_conf), np.linalg.norm(actual_grip - gripper), np.linalg.norm(actual_target - target)
+                    self.agent.save_aux_prediction(diff_object_conf, diff_grip, diff_target)
 
                 
                 eval_obs0, aux0, state0 = self.eval_env.reset(), self.eval_env.get_aux(), self.eval_env.get_state()
@@ -387,7 +392,7 @@ class DistributedTrain(object):
 def train(env,env_id, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, actor, critic,
     normalize_returns, normalize_observations, normalize_aux, critic_l2_reg, actor_lr, critic_lr, action_noise,
     popart, gamma, clip_norm, nb_train_steps, nb_rollout_steps, nb_eval_steps, batch_size, memory, load_file, save_folder, only_eval,
-    run_name, lambda_pretrain, lambda_1step, lambda_nstep, replay_beta,reset_to_demo_rate, tau=0.01, eval_env=None, demo_policy=None, num_demo_steps=0, demo_env=None, render_demo=False, num_pretrain_steps=0, policy_and_target_update_period=2, demo_terminality=5, **kwargs):
+    run_name, lambda_pretrain, lambda_1step, lambda_nstep, replay_beta,reset_to_demo_rate, cloth, tau=0.01, eval_env=None, demo_policy=None, num_demo_steps=0, demo_env=None, render_demo=False, num_pretrain_steps=0, policy_and_target_update_period=2, demo_terminality=5, **kwargs):
 
     assert (np.abs(env.action_space.low) == env.action_space.high).all()  # we assume symmetric actions.
     agent = DDPG(actor, critic, memory, env.observation_space.shape, env.action_space.shape, env.state_space.shape, env.aux_space.shape,
@@ -396,7 +401,7 @@ def train(env,env_id, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, ren
         actor_lr=actor_lr, critic_lr=critic_lr, enable_popart=popart, clip_norm=clip_norm,
         reward_scale=reward_scale, run_name=run_name, lambda_pretrain=lambda_pretrain, lambda_nstep=lambda_nstep, lambda_1step=lambda_1step,
         replay_beta=replay_beta, policy_and_target_update_period=policy_and_target_update_period, **kwargs)
-    dt  = DistributedTrain(run_name, agent, env, nb_rollout_steps, num_pretrain_steps, nb_epochs, nb_epoch_cycles, nb_train_steps, demo_env, demo_policy, render_demo, num_demo_steps, reset_to_demo_rate, render_eval, eval_env, nb_eval_steps, env_id, policy_and_target_update_period, demo_terminality, load_file, save_folder, only_eval)
+    dt  = DistributedTrain(run_name, agent, env, nb_rollout_steps, num_pretrain_steps, nb_epochs, nb_epoch_cycles, nb_train_steps, demo_env, demo_policy, render_demo, num_demo_steps, reset_to_demo_rate, render_eval, eval_env, nb_eval_steps, env_id, policy_and_target_update_period, demo_terminality, load_file, save_folder, only_eval, cloth)
 
     return dt.start()
 

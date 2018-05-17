@@ -23,11 +23,12 @@ class Model(object):
 
 
 class Actor(Model):
-    def __init__(self, nb_actions, n_state,  num_dense_layers, dense_layer_size, layer_norm, conv_size='small',name='actor'):
+    def __init__(self, nb_actions, n_state,  num_dense_layers, dense_layer_size, layer_norm, cloth=False, conv_size='small',name='actor'):
         super(Actor, self).__init__( num_dense_layers, dense_layer_size, layer_norm,name=name)
         self.nb_actions = nb_actions
         self.n_state = n_state
         self.conv_size = conv_size
+        self.cloth = cloth
 
 
     def __call__(self, obs, aux, reuse=False):
@@ -63,8 +64,13 @@ class Actor(Model):
                 x = tc.layers.layer_norm(x, center=True, scale=True)
             x = tf.nn.relu(x)
 
-            x = tf.layers.dense(x, self.dense_layer_size + 9)
-            x, cube, gripper, target = tf.split(x, [self.dense_layer_size, 3, 3, 3], 1)
+            if self.cloth:
+                obj_dim = 12
+            else:
+                obj_dim = 3
+            x = tf.layers.dense(x, self.dense_layer_size + 6 + obj_dim)
+
+            x, object_conf, gripper, target = tf.split(x, [self.dense_layer_size, obj_dim, 3, 3], 1)
             if self.layer_norm:
                 x = tc.layers.layer_norm(x, center=True, scale=True)
             x = tf.nn.relu(x)
@@ -77,7 +83,7 @@ class Actor(Model):
             pi = tf.nn.tanh(x)
 
 
-        return pi, cube, gripper, target
+        return pi, object_conf, gripper, target
 
 
 class Critic(Model):
