@@ -187,7 +187,7 @@ class DistributedTrain(object):
                         print (cube, gripper, target)
 
                         self.eval_env.renderDebugText("grip", preprocess(gripper),textColorRGB= [1,0,0])
-                        self.eval_env.renderDebugText("actual_grip", preprocess(aux0[10:13]),textColorRGB= [0,0,0])
+                        self.eval_env.renderDebugText("actual_grip", preprocess(state0[0:3]),textColorRGB= [0,0,0])
                         self.eval_env.renderDebugText("cube", preprocess(cube),textColorRGB= [0,1,0])
                         self.eval_env.renderDebugText("target", preprocess(target),textColorRGB= [0,0,1])
 
@@ -258,7 +258,7 @@ class DistributedTrain(object):
                 eval_done = False
                 print ("Evaluation {}/{}".format(eval_episode, self.nb_eval_steps), end="\r")
                 while not eval_done:
-                    eval_action, eval_q, _, _, _ = self.agent.pi(eval_obs0, aux0, state0, apply_noise=False, compute_Q=True)
+                    eval_action, eval_q, cube, gripper, target = self.agent.pi(eval_obs0, aux0, state0, apply_noise=False, compute_Q=True)
                     eval_obs0, eval_r, eval_done, eval_info = self.eval_env.step( eval_action)
                     aux0, state0 = self.eval_env.get_aux(), self.eval_env.get_state()
                     eval_qs.append(eval_q)
@@ -267,6 +267,14 @@ class DistributedTrain(object):
                         frame = self.eval_env.render(mode="rgb_array")
                         renderer.record_frame(frame, eval_r)
                     eval_episode_reward += eval_r
+
+                    actual_cube = state0[8:11]
+                    actual_grip = state0[0:3]
+                    actual_target = state0[3:6]
+
+                    diff_cube, diff_grip, diff_target = np.linalg.norm(actual_cube - cube), np.linalg.norm(actual_grip - gripper), np.linalg.norm(actual_target - target)
+                    self.agent.save_aux_prediction(diff_cube, diff_grip, diff_target)
+
                 
                 eval_obs0, aux0, state0 = self.eval_env.reset(), self.eval_env.get_aux(), self.eval_env.get_state()
                 eval_episode_rewards.append(eval_episode_reward)

@@ -306,6 +306,17 @@ class DDPG(object):
         self.r_plot = tf.summary.scalar("returns", self.r_plot_in)
         self.r_plot_in_eval = tf.placeholder(tf.float32, name='r_plot_in_eval')
         self.r_plot_eval = tf.summary.scalar("returns_eval", self.r_plot_in_eval)
+
+
+        self.cube_in_eval = tf.placeholder(tf.float32, name='cube_in_eval')
+        self.cube_eval = tf.summary.scalar("cube_eval", self.cube_in_eval)
+
+        self.grip_in_eval = tf.placeholder(tf.float32, name='grip_in_eval')
+        self.grip_eval = tf.summary.scalar("grip_eval", self.grip_in_eval)
+
+        self.target_in_eval = tf.placeholder(tf.float32, name='target_in_eval')
+        self.target_eval = tf.summary.scalar("target_eval", self.target_in_eval)
+
         self.writer = tf.summary.FileWriter(home + '/pusher_search_summaries_separated_aux/'+ self.run_name, graph=tf.get_default_graph())
 
 
@@ -313,6 +324,14 @@ class DDPG(object):
         self.ep += 1
         summary = self.sess.run(self.r_plot, feed_dict={self.r_plot_in: r})
         self.writer.add_summary(summary, self.ep)
+
+
+    def save_aux_prediction(self, cube, grip, taget):
+        self.ep += 1
+        cube_summ, grip_summ, target_summ = self.sess.run([self.cube_eval, self.grip_eval, self.target_eval], feed_dict={self.cube_in_eval: cube, self.grip_in_eval: grip, self.target_in_eval:target  })
+        self.writer.add_summary(cube_summ, self.ep)
+        self.writer.add_summary(grip_summ, self.ep)
+        self.writer.add_summary(target_summ, self.ep)
 
     def save_eval_reward(self, r, ep):
         summary = self.sess.run(self.r_plot_eval, feed_dict={self.r_plot_in_eval: r})
