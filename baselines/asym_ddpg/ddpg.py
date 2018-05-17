@@ -331,7 +331,7 @@ class DDPG(object):
         self.writer.add_summary(summary, self.ep)
 
 
-    def save_aux_prediction(self, obj_conf, grip, taget):
+    def save_aux_prediction(self, obj_conf, grip, target):
         self.ep += 1
         obj_conf_summ, grip_summ, target_summ = self.sess.run([self.obj_conf_eval, self.grip_eval, self.target_eval], feed_dict={self.obj_conf_in_eval: obj_conf, self.grip_in_eval: grip, self.target_in_eval:target  })
         self.writer.add_summary(obj_conf_summ, self.ep)
