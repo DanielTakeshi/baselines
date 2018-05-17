@@ -10,6 +10,7 @@ from baselines.common.misc_util import (
 import baselines.asym_ddpg.distributed_train as training
 from baselines.asym_ddpg.models import Actor, Critic
 from baselines.asym_ddpg.prioritized_memory import Memory
+from baselines.asym_ddpg.prioritized_memory import PrioritizedMemory
 from baselines.asym_ddpg.noise import *
 import sys
 import gym
@@ -64,8 +65,8 @@ def run(env_id, eval_env_id, seed, noise_type, evaluation,demo_policy,use_veloci
 
     #TODO:
 
-    memory = Memory(limit=int(1e4 * 5))
-
+    #memory = Memory(limit=int(1e4 * 5))
+    memory = PrioritizedMemory(limit=int(1e4 * 5), alpha=replay_alpha, demo_epsilon=demo_epsilon)
     critic = Critic(num_dense_layers, dense_layer_size, layer_norm)
     actor = Actor(nb_actions, env.state_space.shape[0], num_dense_layers, dense_layer_size, layer_norm, conv_size=conv_size)
 
