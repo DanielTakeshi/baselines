@@ -101,7 +101,7 @@ class RolloutWorker(object):
                     episodes += 1
                     self.epoch_rewards.append(episode_reward)
                     episode_reward = 0.
-                    if np.random.uniform(0, 1) < self.reset_to_demo_rate_sched.value(self.num_steps):
+                    if np.random.uniform(0, 1) < self.reset_to_demo_rate_sched.value(i):
                         while (True):
                             memory = self.agent.memory
 
@@ -219,7 +219,7 @@ class DistributedTrain(object):
         num_steps = self.nb_epochs * self.nb_epoch_cycles * self.nb_rollout_steps
         rws = []
         for i in range(1):
-            rw = RolloutWorker(self.env_id, self.agent, num_steps,self.run_name, LinearSchedule(5e5, self.reset_to_demo_rate, 0.1), i, self.demo_terminality)
+            rw = RolloutWorker(self.env_id, self.agent, num_steps,self.run_name, LinearSchedule(8e4, self.reset_to_demo_rate, 0.1), i, self.demo_terminality)
             thread = Thread(target = rw.exec_rollouts, daemon=True)
             thread.start()
             rws.append(rw)
