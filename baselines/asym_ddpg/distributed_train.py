@@ -400,7 +400,7 @@ def train(env,env_id, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, ren
         batch_size=batch_size, action_noise=action_noise, critic_l2_reg=critic_l2_reg,
         actor_lr=actor_lr, critic_lr=critic_lr, enable_popart=popart, clip_norm=clip_norm,
         reward_scale=reward_scale, run_name=run_name, lambda_pretrain=lambda_pretrain, lambda_nstep=lambda_nstep, lambda_1step=lambda_1step,
-        replay_beta=replay_beta, policy_and_target_update_period=policy_and_target_update_period, **kwargs)
+        replay_beta=replay_beta, policy_and_target_update_period=policy_and_target_update_period,cloth=cloth, **kwargs)
     dt  = DistributedTrain(run_name, agent, env, nb_rollout_steps, num_pretrain_steps, nb_epochs, nb_epoch_cycles, nb_train_steps, demo_env, demo_policy, render_demo, num_demo_steps, reset_to_demo_rate, render_eval, eval_env, nb_eval_steps, env_id, policy_and_target_update_period, demo_terminality, load_file, save_folder, only_eval, cloth)
 
     return dt.start()

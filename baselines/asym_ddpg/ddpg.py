@@ -49,12 +49,12 @@ def get_target_updates(vars, target_vars, tau):
 
 class DDPG(object):
     def __init__(self, actor, critic, memory, observation_shape, action_shape, state_shape, aux_shape, lambda_obj_conf_predict, lambda_gripper_predict, lambda_target_predict, 
-         action_noise=None,
+         cloth, action_noise=None,
         gamma=0.99, tau=0.001, normalize_returns=False, enable_popart=False, normalize_observations=True, normalize_state=True, normalize_aux=True,
         batch_size=128, observation_range=(-10., 10.), action_range=(-1., 1.), state_range=(-4, 4), return_range=(-250, 10), aux_range=(-10, 10),
         critic_l2_reg=0.001, actor_lr=1e-4, critic_lr=1e-3, clip_norm=None, reward_scale=1., replay_beta=0.4,lambda_1step=1.0,
          lambda_nstep=1.0, nsteps=10, run_name="unnamed_run", lambda_pretrain=0.0, target_policy_noise=0.2, target_policy_noise_clip=0.5,
-          policy_and_target_update_period=2, num_critics=2, cloth=False, **kwargs):
+          policy_and_target_update_period=2, num_critics=2, **kwargs):
 
         # Inputs.
         self.obs0 = tf.placeholder(tf.float32, shape=(None,) + observation_shape, name='obs0')
@@ -229,10 +229,10 @@ class DDPG(object):
             demo_better_than_critic = self.pretraining_tf * tf.cast(demo_better_than_critic, tf.float32)
             self.bc_loss = (tf.reduce_sum(demo_better_than_critic * self.action_diffs) * self.lambda_pretrain / (tf.reduce_sum(self.pretraining_tf) + 1e-6))
             self.original_actor_loss = -tf.reduce_mean(self.critic_with_actor_tfs[0])
-            if not self.cloth:
+            if self.cloth:
                 self.obj_conf_loss = tf.reduce_mean(tf.square(self.obj_conf - self.state0 [:,5:17])) * self.lambda_obj_conf_predict
                 self.gripper_loss = tf.reduce_mean(tf.square(self.gripper - self.state0[:,0:3])) * self.lambda_gripper_predict
-                self.target_loss = 0
+                self.target_loss = tf.reduce_mean(tf.square(self.target - self.state0[:,25:26])) * self.lambda_target_predict
             else:
 
                 self.obj_conf_loss = tf.reduce_mean(tf.square(self.obj_conf - self.state0 [:, 8:11])) * self.lambda_obj_conf_predict
@@ -322,7 +322,7 @@ class DDPG(object):
         self.target_in_eval = tf.placeholder(tf.float32, name='target_in_eval')
         self.target_eval = tf.summary.scalar("target_eval", self.target_in_eval)
 
-        self.writer = tf.summary.FileWriter(home + '/pusher_search_summaries_separated_aux/'+ self.run_name, graph=tf.get_default_graph())
+        self.writer = tf.summary.FileWriter(home + '/cloth_new_task/'+ self.run_name, graph=tf.get_default_graph())
 
 
     def save_reward(self, r):
