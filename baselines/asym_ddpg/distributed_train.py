@@ -219,7 +219,7 @@ class DistributedTrain(object):
         num_steps = self.nb_epochs * self.nb_epoch_cycles * self.nb_rollout_steps
         rws = []
         for i in range(1):
-            rw = RolloutWorker(self.env_id, self.agent, num_steps,self.run_name, LinearSchedule(8e4, self.reset_to_demo_rate, 0.1), i, self.demo_terminality)
+            rw = RolloutWorker(self.env_id, self.agent, num_steps,self.run_name, LinearSchedule(2e5, initial_p=self.reset_to_demo_rate, final_p=0.1), i, self.demo_terminality)
             thread = Thread(target = rw.exec_rollouts, daemon=True)
             thread.start()
             rws.append(rw)
@@ -271,7 +271,7 @@ class DistributedTrain(object):
                     if self.cloth:
                         actual_object_conf = state0[5:17]
                         actual_grip = state0[0:3]
-                        actual_target = 0                       
+                        actual_target = state0[25]                       
                     else:
                         actual_object_conf = state0[8:11]
                         actual_grip = state0[0:3]
