@@ -372,7 +372,9 @@ class DistributedTrain(object):
                 "action_shace":  self.eval_env.action_space.shape,
                 "aux_shape":  self.eval_env.aux_space.shape,
                 "baselines_version":  baselines_repo.head.object.hexsha,
+                "baselines_diff": main_repo.git.diff(),
                 "main_version":  main_repo.head.object.hexsha,
+                "main_diff": main_repo.git.diff(),
                 "call_command": " ".joint(sys.argv),
             },
             "demo_data": {
