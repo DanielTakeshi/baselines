@@ -9,6 +9,7 @@ from baselines.common.misc_util import (
 )
 import baselines.asym_ddpg.distributed_train as training
 from baselines.asym_ddpg.models import Actor, Critic
+from baselines.asym_ddpg.prioritized_memory import Memory
 from baselines.asym_ddpg.prioritized_memory import PrioritizedMemory
 from baselines.asym_ddpg.noise import *
 import sys
@@ -18,7 +19,7 @@ from mpi4py import MPI
 import micoenv
 import learning.demo_policies as demo
 
-def run(env_id, eval_env_id, seed, noise_type, evaluation,demo_policy,use_velocities, num_dense_layers, dense_layer_size, layer_norm,demo_epsilon,replay_alpha,conv_size, **kwargs):
+def run(env_id, eval_env_id, seed, noise_type, evaluation,demo_policy,use_velocities, num_dense_layers, dense_layer_size, layer_norm,demo_epsilon,replay_alpha,conv_size,cloth, **kwargs):
     # Configure things.
     if use_velocities:
         assert "velos" in env_id
@@ -64,10 +65,10 @@ def run(env_id, eval_env_id, seed, noise_type, evaluation,demo_policy,use_veloci
 
     #TODO:
 
+    #memory = Memory(limit=int(1e4 * 5))
     memory = PrioritizedMemory(limit=int(1e4 * 5), alpha=replay_alpha, demo_epsilon=demo_epsilon)
-
     critic = Critic(num_dense_layers, dense_layer_size, layer_norm)
-    actor = Actor(nb_actions, env.state_space.shape[0], num_dense_layers, dense_layer_size, layer_norm, conv_size=conv_size)
+    actor = Actor(nb_actions, env.state_space.shape[0], num_dense_layers, dense_layer_size, layer_norm, conv_size=conv_size, cloth=cloth)
 
     # Seed everything to make things reproducible.
     seed = seed + 1000000 * rank
@@ -88,7 +89,7 @@ def run(env_id, eval_env_id, seed, noise_type, evaluation,demo_policy,use_veloci
         demo_policy_object = demo.policies[demo_policy]()
     if use_velocities:
         demo_policy_object = demo.VelocityWrapper(demo_policy_object,demo_env)
-    eval_avg = training.train(env=env,env_id=env_id, eval_env=eval_env,        action_noise=action_noise, actor=actor, critic=critic, memory=memory, demo_policy=demo_policy_object, demo_env=demo_env, **kwargs)
+    eval_avg = training.train(env=env,env_id=env_id, eval_env=eval_env,        action_noise=action_noise, actor=actor, critic=critic, memory=memory, demo_policy=demo_policy_object, demo_env=demo_env, cloth=cloth, **kwargs)
     env.close()
     if eval_env is not None:
         eval_env.close()
@@ -100,7 +101,7 @@ def run(env_id, eval_env_id, seed, noise_type, evaluation,demo_policy,use_veloci
 def parse_args():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-    parser.add_argument('--env-id', type=str, default='MicoEnv-grabber-dense-v1')
+    parser.add_argument('--env-id', type=str, default='MicoEnv-pusher_fix-pixels-sparse-ik-acton-v1')
     parser.add_argument('--eval-env-id', type=str, default='')
     boolean_flag(parser, 'render-eval', default=True)
     boolean_flag(parser, 'render-demo', default=True)
@@ -132,8 +133,8 @@ def parse_args():
     parser.add_argument('--num-timesteps', type=int, default=None)
     parser.add_argument('--num-demo-steps', type=int, default=20)
     parser.add_argument('--num-pretrain-steps', type=int, default=2000)
-    parser.add_argument('--run-name', type=str, default='')
-    parser.add_argument('--demo-policy', type=str, default='None')
+    parser.add_argument('--run-name', type=str, default='ignore')
+    parser.add_argument('--demo-policy', type=str, default='pusher')
     parser.add_argument('--lambda-pretrain', type=float, default=5.0)
     parser.add_argument('--lambda-nstep', type=float, default=0.5)
     parser.add_argument('--lambda-1step', type=float, default=1.0)
@@ -150,10 +151,13 @@ def parse_args():
     parser.add_argument('--demo-terminality', type=int, default=5)
     parser.add_argument('--replay-alpha', type=float, default=0.8)
     parser.add_argument('--demo-epsilon', type=float, default=0.2)
-    parser.add_argument('--lambda-state-predict', type=float, default=1000.0)
+    parser.add_argument('--lambda-obj-conf-predict', type=float, default=10000.0)
+    parser.add_argument('--lambda-target-predict', type=float, default=10000.0)
+    parser.add_argument('--lambda-gripper-predict', type=float, default=10000.0)
 
     boolean_flag(parser, 'positive-reward', default=True)
     boolean_flag(parser, 'only-eval', default=False)
+    boolean_flag(parser, 'cloth', default=False)
 
 
     boolean_flag(parser, 'evaluation', default=True)

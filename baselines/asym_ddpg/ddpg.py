@@ -48,12 +48,13 @@ def get_target_updates(vars, target_vars, tau):
     return tf.group(*init_updates), tf.group(*soft_updates)
 
 class DDPG(object):
-    def __init__(self, actor, critic, memory, observation_shape, action_shape, state_shape, aux_shape, action_noise=None,
+    def __init__(self, actor, critic, memory, observation_shape, action_shape, state_shape, aux_shape, lambda_obj_conf_predict, lambda_gripper_predict, lambda_target_predict, 
+         cloth, action_noise=None,
         gamma=0.99, tau=0.001, normalize_returns=False, enable_popart=False, normalize_observations=True, normalize_state=True, normalize_aux=True,
         batch_size=128, observation_range=(-10., 10.), action_range=(-1., 1.), state_range=(-4, 4), return_range=(-250, 10), aux_range=(-10, 10),
         critic_l2_reg=0.001, actor_lr=1e-4, critic_lr=1e-3, clip_norm=None, reward_scale=1., replay_beta=0.4,lambda_1step=1.0,
          lambda_nstep=1.0, nsteps=10, run_name="unnamed_run", lambda_pretrain=0.0, target_policy_noise=0.2, target_policy_noise_clip=0.5,
-          policy_and_target_update_period=2, num_critics=2, lambda_state_predict=1.0, **kwargs):
+          policy_and_target_update_period=2, num_critics=2, **kwargs):
 
         # Inputs.
         self.obs0 = tf.placeholder(tf.float32, shape=(None,) + observation_shape, name='obs0')
@@ -78,7 +79,7 @@ class DDPG(object):
         self.pretraining_tf = tf.placeholder(tf.float32, shape=(None, 1),
                                              name='pretraining_tf')  # whether we use pre training or not
         # Parameters.
-
+        self.cloth = cloth
         self.aux_shape = aux_shape
         self.gamma = gamma
         self.tau = tau
@@ -103,7 +104,9 @@ class DDPG(object):
         self.critic_l2_reg = critic_l2_reg
         self.lambda_nstep = lambda_nstep
         self.lambda_1step = lambda_1step
-        self.lambda_state_predict = lambda_state_predict
+        self.lambda_obj_conf_predict = lambda_obj_conf_predict
+        self.lambda_gripper_predict = lambda_gripper_predict
+        self.lambda_target_predict = lambda_target_predict
         self.nsteps = nsteps
         self.replay_beta = replay_beta
         self.run_name = run_name
@@ -157,9 +160,8 @@ class DDPG(object):
         target_actor.name = 'target_actor'
         self.target_actor = target_actor
 
-        self.actor_tf, normalized_state0_actor = actor(self.normalized_obs0, self.normalized_aux0)
-        self.state0_actor = denormalize(normalized_state0_actor, self.state_rms)
-        next_actions, _ = target_actor(self.normalized_obs1, self.normalized_aux1)
+        self.actor_tf, self.obj_conf, self.gripper, self.target  = actor(self.normalized_obs0, self.normalized_aux0)
+        next_actions, _, _, _ = target_actor(self.normalized_obs1, self.normalized_aux1)
         noise = tf.distributions.Normal(tf.zeros_like(next_actions),
             self.target_policy_noise
         ).sample()
@@ -227,11 +229,22 @@ class DDPG(object):
             demo_better_than_critic = self.pretraining_tf * tf.cast(demo_better_than_critic, tf.float32)
             self.bc_loss = (tf.reduce_sum(demo_better_than_critic * self.action_diffs) * self.lambda_pretrain / (tf.reduce_sum(self.pretraining_tf) + 1e-6))
             self.original_actor_loss = -tf.reduce_mean(self.critic_with_actor_tfs[0])
+            if self.cloth:
+                self.obj_conf_loss = tf.reduce_mean(tf.square(self.obj_conf - self.state0 [:,5:17])) * self.lambda_obj_conf_predict
+                self.gripper_loss = tf.reduce_mean(tf.square(self.gripper - self.state0[:,0:3])) * self.lambda_gripper_predict
+                if state0.shape[1] > 25:
+                    self.target_loss = tf.reduce_mean(tf.square(self.target - self.state0[:,25:26])) * self.lambda_target_predict
+                else:
+                    target_loss = 0
 
-            self.state_predict_loss = tf.reduce_mean(tf.square(self.state0_actor - self.state0)) * self.lambda_state_predict
+            else:
+
+                self.obj_conf_loss = tf.reduce_mean(tf.square(self.obj_conf - self.state0 [:, 8:11])) * self.lambda_obj_conf_predict
+                self.gripper_loss = tf.reduce_mean(tf.square(self.gripper - self.state0[:,0:3])) * self.lambda_gripper_predict
+                self.target_loss = tf.reduce_mean(tf.square(self.target - self.state0[:,3:6])) * self.lambda_target_predict
 
 
-            self.actor_loss = self.original_actor_loss + self.bc_loss + self.state_predict_loss
+            self.actor_loss = self.original_actor_loss + self.bc_loss + self.obj_conf_loss + self.gripper_loss + self.target_loss
             self.number_of_demos_better = tf.reduce_sum(demo_better_than_critic)
             actor_shapes = [var.get_shape().as_list() for var in self.actor.trainable_vars]
             actor_nb_params = sum([reduce(lambda x, y: x * y, shape) for shape in actor_shapes])
@@ -290,7 +303,9 @@ class DDPG(object):
         tf.summary.scalar("number_of_demos_better_than_actor", self.number_of_demos_better)
         tf.summary.histogram("pretrain_samples", self.pretraining_tf)
         tf.summary.scalar("bc_loss", self.bc_loss)
-        tf.summary.scalar("state_predict_loss", self.state_predict_loss)
+        tf.summary.scalar("obj_conf_loss", self.obj_conf_loss)
+        tf.summary.scalar("target_loss", self.target_loss)
+        tf.summary.scalar("gripper_loss", self.gripper_loss)
         tf.summary.scalar("original_actor_loss", self.original_actor_loss)
         tf.summary.scalar("memory_size", self.memory_size)
         tf.summary.scalar("rss", self.rss)
@@ -300,13 +315,32 @@ class DDPG(object):
         self.r_plot = tf.summary.scalar("returns", self.r_plot_in)
         self.r_plot_in_eval = tf.placeholder(tf.float32, name='r_plot_in_eval')
         self.r_plot_eval = tf.summary.scalar("returns_eval", self.r_plot_in_eval)
-        self.writer = tf.summary.FileWriter(home + '/pusher_search_summaries/'+ self.run_name, graph=tf.get_default_graph())
+
+
+        self.obj_conf_in_eval = tf.placeholder(tf.float32, name='obj_conf_in_eval')
+        self.obj_conf_eval = tf.summary.scalar("obj_conf_eval", self.obj_conf_in_eval)
+
+        self.grip_in_eval = tf.placeholder(tf.float32, name='grip_in_eval')
+        self.grip_eval = tf.summary.scalar("grip_eval", self.grip_in_eval)
+
+        self.target_in_eval = tf.placeholder(tf.float32, name='target_in_eval')
+        self.target_eval = tf.summary.scalar("target_eval", self.target_in_eval)
+
+        self.writer = tf.summary.FileWriter(home + '/cloth_home/'+ self.run_name, graph=tf.get_default_graph())
 
 
     def save_reward(self, r):
         self.ep += 1
         summary = self.sess.run(self.r_plot, feed_dict={self.r_plot_in: r})
         self.writer.add_summary(summary, self.ep)
+
+
+    def save_aux_prediction(self, obj_conf, grip, target):
+        self.ep += 1
+        obj_conf_summ, grip_summ, target_summ = self.sess.run([self.obj_conf_eval, self.grip_eval, self.target_eval], feed_dict={self.obj_conf_in_eval: obj_conf, self.grip_in_eval: grip, self.target_in_eval:target  })
+        self.writer.add_summary(obj_conf_summ, self.ep)
+        self.writer.add_summary(grip_summ, self.ep)
+        self.writer.add_summary(target_summ, self.ep)
 
     def save_eval_reward(self, r, ep):
         summary = self.sess.run(self.r_plot_eval, feed_dict={self.r_plot_in_eval: r})
@@ -346,10 +380,10 @@ class DDPG(object):
         feed_dict = {self.obs0: [obs], self.aux0: [aux], self.state0:[ state0]}
         if compute_Q:
 
-            action, q, state = self.sess.run([actor_tf, self.critic_with_actor_tfs[0], self.state0_actor], feed_dict=feed_dict)
+            action, q, obj_conf, gripper, target = self.sess.run([actor_tf, self.critic_with_actor_tfs[0], self.obj_conf, self.gripper, self.target], feed_dict=feed_dict)
 
         else:
-            action, state = self.sess.run([actor_tf, self.state0_actor], feed_dict=feed_dict)
+            action, obj_conf, gripper, target = self.sess.run([actor_tf, self.obj_conf, self.gripper, self.target], feed_dict=feed_dict)
             q = None
         action = action.flatten()
         if self.action_noise is not None and apply_noise:
@@ -359,7 +393,7 @@ class DDPG(object):
 
         action = np.clip(action, self.action_range[0], self.action_range[1])
 
-        return action, q, state
+        return action, q, obj_conf, gripper, target
 
     def store_transition(self, state, obs0, action, reward, state1, obs1, terminal1, goal, goalobs, aux0, aux1,i, demo=False):
         assert goal == None
@@ -499,7 +533,9 @@ class DDPG(object):
             "lambda_pretrain" : self.lambda_pretrain,
             "target_policy_noise" : self.target_policy_noise,
             "target_policy_noise_clip" : self.target_policy_noise_clip,
-            "lambda_state_predict" : self.lambda_state_predict,
+            "lambda_obj_conf_predict" : self.lambda_obj_conf_predict,
+            "lambda_target_predict" : self.lambda_target_predict,
+            "lambda_gripper_predict" : self.lambda_gripper_predict,
 
 
         }

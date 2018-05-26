@@ -11,7 +11,7 @@ def array_min2d(x):
     return x.reshape(-1, 1)
 
 class Memory(object):
-    def __init__(self, limit):
+    def __init__(self, limit, nb_rollout_steps=100):
         self.lock = RLock()
         self.condition = Condition(self.lock)
         self._storage = []
@@ -19,18 +19,35 @@ class Memory(object):
         self._next_idx = 0
         self._adding_demonstrations = True
         self._num_demonstrations = 0
+        self.nb_rollout_steps = nb_rollout_steps
+        self._total_transitions = 0
+        self._total_transition_limit = self.nb_rollout_steps
         self.storable_elements = ["states0", "obs0", "actions", "rewards", "states1", "obs1", "terminals1", "goals", "goal_observations", "aux0", "aux1", "demo_state_id"]
     def __len__(self):
         with self.lock:
             return len(self._storage)
 
+
+    @property
+    def total_transitions(self):
+        with self.lock:
+            return self._total_transitions
+    
+    def grow_limit(self, num):
+        with self.condition:
+            self._total_transition_limit += self.nb_rollout_steps
+            self.condition.notify_all()
     @property
     def nb_entries(self):
         with self.lock:
             return len(self._storage)
-    def append(self, *args,  training=True):
+    def append(self, *args,  training=True, count=True):
+        if count:
+            self._total_transitions += 1
         
         with self.condition:
+            while self._total_transitions >= self._total_transition_limit:
+                self.condition.wait()
             assert len(args) == len(self.storable_elements)
             if not training:
                 return False
@@ -48,7 +65,7 @@ class Memory(object):
         with self.lock:
             assert len(args) == len(self.storable_elements)
             assert self._adding_demonstrations
-            if not self.append(*args, **kwargs):
+            if not self.append(*args, count=False, **kwargs):
               return
             self._num_demonstrations += 1
     def _get_batches_for_idxes(self, idxes):
@@ -61,34 +78,68 @@ class Memory(object):
                     batches[self.storable_elements[j]].append(data)
             result = {k: array_min2d(v) for k, v in batches.items()}
             return result
-
-    def sample(self, batch_size):
+    
+    def sample(self,batch_size):
         with self.lock:
             idxes = np.random.random_integers(low=0, high=self.nb_entries - 1, size=batch_size)
+            demos = [i < self._num_demonstrations for i in idxes]
+            encoded_sample = self._get_batches_for_idxes(idxes)
+            encoded_sample['weights'] = array_min2d(np.ones((batch_size,)))
+            encoded_sample['idxes'] = idxes
+            encoded_sample['demos'] = array_min2d(demos)
+            return encoded_sample
 
-            return self._get_batches_for_idxes(idxes)
 
     def demonstrationsDone(self):
         with self.lock:
             self._adding_demonstrations = False
 
-    def sample_rollout(self, batch_size, nsteps, beta, gamma):
+    def sample_rollout(self, batch_size, nsteps, beta, gamma, pretrain=False):
         with self.lock:
-            raise Exception("Not implemented")
+            batches = self.sample(batch_size)
+            n_step_batches = {storable_element: [] for storable_element in self.storable_elements}
+            n_step_batches["step_reached"] = []
+            idxes = batches["idxes"]
+            for idx in idxes:
+                local_idxes = list(range(idx, min(idx + nsteps, len(self))))
+                transitions = self._get_batches_for_idxes(local_idxes)
+                summed_reward = 0
+                count = 0
+                terminal = 0.0
+                terminals = transitions['terminals1']
+                r = transitions['rewards']
+                for i in range(len(r)):
+                    summed_reward += (gamma ** i) * r[i]
+                    count = i
+                    if terminals[i]:
+                        terminal = 1.0
+                        break
+                n_step_batches["step_reached"].append(count)
+                n_step_batches["obs1"].append(transitions["obs1"][count])
+                n_step_batches["terminals1"].append(terminal)
+                n_step_batches["rewards"].append(summed_reward)
+                n_step_batches["states1"].append(transitions["states1"][count])
+                n_step_batches["aux1"].append(transitions["aux1"][count])
+                n_step_batches["actions"].append(transitions["actions"][0])
+            n_step_batches['demos'] = batches['demos']
+            n_step_batches = {k: array_min2d(v) for k, v in n_step_batches.items()}
+            n_step_batches['weights'] = batches['weights']
+            n_step_batches['idxes'] = idxes
+            n_step_batches['weights'] = batches['weights']
+            return batches, n_step_batches, sum(batches['demos'])/batch_size
+
+    def update_priorities(self, idxes, td_errors, actor_losses=0.0):
+        pass
 
 
 class PrioritizedMemory(Memory):
     def  __init__(self, limit, alpha, transition_small_epsilon=1e-6, demo_epsilon=0.2, nb_rollout_steps=100):
-        super(PrioritizedMemory, self).__init__(limit)
+        super(PrioritizedMemory, self).__init__(limit, nb_rollout_steps)
         assert alpha > 0
         self._alpha = alpha
         self._transition_small_epsilon = transition_small_epsilon
         self._demo_epsilon = demo_epsilon
-        self._print_counter = 0
 
-        self._first_time_sample = True
-        self._indexes = []
-        self.nb_rollout_steps = nb_rollout_steps
 
         it_capacity = 1
         while it_capacity < self._maxsize:
@@ -97,37 +148,26 @@ class PrioritizedMemory(Memory):
         self._it_sum = SumSegmentTree(it_capacity)
         self._it_min = MinSegmentTree(it_capacity)
         self._max_priority = 1.0
-        self._total_transitions = 0
-        self._total_transition_limit = self.nb_rollout_steps
-    @property
-    def total_transitions(self):
-        with self.lock:
-            return self._total_transitions
-    
-    def grow_limit(self, num):
-        with self.condition:
-            self._total_transition_limit += self.nb_rollout_steps
-            self.condition.notify_all()
+
+
 
     def append(self, *args, **kwargs):
         with self.condition:
-            while self._total_transitions >= self._total_transition_limit:
-                self.condition.wait()
+
             idx = self._next_idx
-            self._total_transitions += 1
             if not super().append(*args, **kwargs):
               return
-            self._it_sum[idx] = self._max_priority ** self._alpha
-            self._it_min[idx] = self._max_priority ** self._alpha
+            self._it_sum[idx] = self._max_priority 
+            self._it_min[idx] = self._max_priority 
 
     def append_demonstration(self, *args, **kwargs):
         with self.lock:
             """See ReplayBuffer.store_effect"""
             idx = self._next_idx
-            if not super().append(*args, **kwargs):
+            if not super().append(*args, **kwargs, count=False):
               return
-            self._it_sum[idx] = self._max_priority ** self._alpha
-            self._it_min[idx] = self._max_priority ** self._alpha
+            self._it_sum[idx] = self._max_priority 
+            self._it_min[idx] = self._max_priority 
             self._num_demonstrations += 1
 
 

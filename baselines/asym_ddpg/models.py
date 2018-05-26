@@ -23,11 +23,12 @@ class Model(object):
 
 
 class Actor(Model):
-    def __init__(self, nb_actions, n_state,  num_dense_layers, dense_layer_size, layer_norm, conv_size='small',name='actor'):
+    def __init__(self, nb_actions, n_state,  num_dense_layers, dense_layer_size, layer_norm, cloth=False, conv_size='small',name='actor'):
         super(Actor, self).__init__( num_dense_layers, dense_layer_size, layer_norm,name=name)
         self.nb_actions = nb_actions
         self.n_state = n_state
         self.conv_size = conv_size
+        self.cloth = cloth
 
 
     def __call__(self, obs, aux, reuse=False):
@@ -51,16 +52,41 @@ class Actor(Model):
                     raise('Unknow size')
                 x = tf.layers.flatten(x)
             x = tf.concat([x, aux], axis=-1)
-            for i in range(self.num_dense_layers):
-                x = tf.layers.dense(x, self.dense_layer_size)
-                if self.layer_norm:
-                    x = tc.layers.layer_norm(x, center=True, scale=True)
-                x = tf.nn.relu(x)
-            x = tf.layers.dense(x, self.nb_actions + self.n_state, kernel_initializer=tf.random_uniform_initializer(minval=-3e-3, maxval=3e-3))
-            pi, state = tf.split(x, [self.nb_actions, self.n_state], 1)
 
-            pi = tf.nn.tanh(pi)
-        return pi, state
+            x = tf.layers.dense(x, self.dense_layer_size)
+            if self.layer_norm:
+                x = tc.layers.layer_norm(x, center=True, scale=True)
+            x = tf.nn.relu(x)
+
+            x = tf.layers.dense(x, self.dense_layer_size)
+            
+            if self.layer_norm:
+                x = tc.layers.layer_norm(x, center=True, scale=True)
+            x = tf.nn.relu(x)
+
+            if self.cloth:
+                obj_dim = 12
+                target_dim = 1
+            else:
+                obj_dim = 3
+                target_dim = 3
+
+            x = tf.layers.dense(x, self.dense_layer_size + 3 + obj_dim + target_dim)
+
+            x, object_conf, gripper, target = tf.split(x, [self.dense_layer_size, obj_dim, 3, target_dim], 1)
+            if self.layer_norm:
+                x = tc.layers.layer_norm(x, center=True, scale=True)
+            x = tf.nn.relu(x)
+
+            x = tf.layers.dense(x, self.dense_layer_size)
+            if self.layer_norm:
+                x = tc.layers.layer_norm(x, center=True, scale=True)
+            x = tf.nn.relu(x)
+            x = tf.layers.dense(x, self.nb_actions, kernel_initializer=tf.random_uniform_initializer(minval=-3e-3, maxval=3e-3))
+            pi = tf.nn.tanh(x)
+
+
+        return pi, object_conf, gripper, target
 
 
 class Critic(Model):
