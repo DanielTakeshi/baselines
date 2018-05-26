@@ -42,7 +42,7 @@ class Renderer(object):
 
     def finalize_and_upload(self):
         self.rgb.release()
-        uploadToDrive(self.run_name, self.fname, self.directory + self.fname, delete=True)
+        uploadToDrive(self.run_name, self.fname, self.directory + self.fname, delete=True, parent="1K4U7075bbr04J7hVMJ9hmF4GBSgI1gKR")
 
 ##### Stuff to be done in workers ########
 class RolloutWorker(object):
