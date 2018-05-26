@@ -235,7 +235,7 @@ class DDPG(object):
                 if self.state0.shape[1] > 25:
                     self.target_loss = tf.reduce_mean(tf.square(self.target - self.state0[:,25:26])) * self.lambda_target_predict
                 else:
-                    target_loss = 0
+                    self.target_loss = 0
 
             else:
 
