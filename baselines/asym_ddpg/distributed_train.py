@@ -17,13 +17,12 @@ import sys
 from baselines.common.schedules import LinearSchedule
 from drive_util import uploadToDrive
 from pathlib import Path
-
+import sys
 home = str(Path.home())
 
 demo_states_dir = home+"/demo_states"
 demo_states_template = demo_states_dir+ "/{}/{}.bullet"
 from threading import Thread
-
 
 class Renderer(object):
     def __init__(self, type, run_name, epoch, seed=None):
@@ -42,7 +41,7 @@ class Renderer(object):
 
     def finalize_and_upload(self):
         self.rgb.release()
-        uploadToDrive(self.run_name, self.fname, self.directory + self.fname, delete=True)
+        uploadToDrive(self.run_name, self.fname, self.directory + self.fname, delete=True, parent="1K4U7075bbr04J7hVMJ9hmF4GBSgI1gKR")
 
 ##### Stuff to be done in workers ########
 class RolloutWorker(object):
@@ -363,13 +362,20 @@ class DistributedTrain(object):
 
         print("Collected {} demo transition.".format(self.agent.memory._num_demonstrations))
     def _write_summary(self):
+        baselines_repo = git.Repo(home + "fyp/src/baselines")
+        main_repo = git.Repo(home + "fyp/src")
         training_text_summary = {
             "env_data": {
                 "env:": str(self.eval_env),
                 "run_name": self.run_name,
                 "obs_shape":  self.eval_env.observation_space.shape,
                 "action_shace":  self.eval_env.action_space.shape,
-                "aux_shape":  self.eval_env.aux_space.shape
+                "aux_shape":  self.eval_env.aux_space.shape,
+                "baselines_version":  baselines_repo.head.object.hexsha,
+                "baselines_diff": main_repo.git.diff(),
+                "main_version":  main_repo.head.object.hexsha,
+                "main_diff": main_repo.git.diff(),
+                "call_command": " ".joint(sys.argv),
             },
             "demo_data": {
                 "policy": self.demo_policy.__class__.__name__,
@@ -384,7 +390,8 @@ class DistributedTrain(object):
                 "nb_epochs": self.nb_epochs,
                 "nb_epoch_cycles": self.nb_epoch_cycles,
 
-            }
+            },
+
         }
         self.agent.write_summary(training_text_summary)
 
