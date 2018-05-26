@@ -362,8 +362,9 @@ class DistributedTrain(object):
 
         print("Collected {} demo transition.".format(self.agent.memory._num_demonstrations))
     def _write_summary(self):
-        baselines_repo = git.Repo(home + "fyp/src/baselines")
-        main_repo = git.Repo(home + "fyp/src")
+        import git
+        baselines_repo = git.Repo(home + "/fyp/src/baselines")
+        main_repo = git.Repo(home + "/fyp")
         training_text_summary = {
             "env_data": {
                 "env:": str(self.eval_env),
@@ -372,10 +373,10 @@ class DistributedTrain(object):
                 "action_shace":  self.eval_env.action_space.shape,
                 "aux_shape":  self.eval_env.aux_space.shape,
                 "baselines_version":  baselines_repo.head.object.hexsha,
-                "baselines_diff": main_repo.git.diff(),
+                "baselines_diff": baselines_repo.git.diff(),
                 "main_version":  main_repo.head.object.hexsha,
                 "main_diff": main_repo.git.diff(),
-                "call_command": " ".joint(sys.argv),
+                "call_command": " ".join(sys.argv),
             },
             "demo_data": {
                 "policy": self.demo_policy.__class__.__name__,

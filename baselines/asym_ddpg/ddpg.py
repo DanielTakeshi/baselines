@@ -232,7 +232,7 @@ class DDPG(object):
             if self.cloth:
                 self.obj_conf_loss = tf.reduce_mean(tf.square(self.obj_conf - self.state0 [:,5:17])) * self.lambda_obj_conf_predict
                 self.gripper_loss = tf.reduce_mean(tf.square(self.gripper - self.state0[:,0:3])) * self.lambda_gripper_predict
-                if state0.shape[1] > 25:
+                if self.state0.shape[1] > 25:
                     self.target_loss = tf.reduce_mean(tf.square(self.target - self.state0[:,25:26])) * self.lambda_target_predict
                 else:
                     target_loss = 0
