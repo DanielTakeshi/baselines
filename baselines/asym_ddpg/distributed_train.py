@@ -269,9 +269,12 @@ class DistributedTrain(object):
                         renderer.record_frame(frame, eval_r)
                     eval_episode_reward += eval_r
                     if self.cloth:
+                        if len(state0) > 25:
+                            actual_target = state0[25]
+                        else:
+                            actual_target = 0
                         actual_object_conf = state0[5:17]
                         actual_grip = state0[0:3]
-                        actual_target = state0[25]                       
                     else:
                         actual_object_conf = state0[8:11]
                         actual_grip = state0[0:3]
@@ -279,8 +282,6 @@ class DistributedTrain(object):
 
                     diff_object_conf, diff_grip, diff_target = np.linalg.norm(actual_object_conf - object_conf), np.linalg.norm(actual_grip - gripper), np.linalg.norm(actual_target - target)
                     self.agent.save_aux_prediction(diff_object_conf, diff_grip, diff_target)
-
-                
                 eval_obs0, aux0, state0 = self.eval_env.reset(), self.eval_env.get_aux(), self.eval_env.get_state()
                 eval_episode_rewards.append(eval_episode_reward)
                 self.agent.save_eval_reward(eval_episode_reward, eval_episodes)

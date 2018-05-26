@@ -66,11 +66,14 @@ class Actor(Model):
 
             if self.cloth:
                 obj_dim = 12
+                target_dim = 1
             else:
                 obj_dim = 3
-            x = tf.layers.dense(x, self.dense_layer_size + 4 + obj_dim)
+                target_dim = 3
 
-            x, object_conf, gripper, target = tf.split(x, [self.dense_layer_size, obj_dim, 3, 1], 1)
+            x = tf.layers.dense(x, self.dense_layer_size + 3 + obj_dim + target_dim)
+
+            x, object_conf, gripper, target = tf.split(x, [self.dense_layer_size, obj_dim, 3, target_dim], 1)
             if self.layer_norm:
                 x = tc.layers.layer_norm(x, center=True, scale=True)
             x = tf.nn.relu(x)
