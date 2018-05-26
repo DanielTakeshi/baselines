@@ -105,7 +105,7 @@ def parse_args():
     parser.add_argument('--eval-env-id', type=str, default='')
     boolean_flag(parser, 'render-eval', default=True)
     boolean_flag(parser, 'render-demo', default=True)
-    boolean_flag(parser, 'layer-norm', default=True)
+    boolean_flag(parser, 'layer-norm', default=False)
     boolean_flag(parser, 'render', default=False)
     boolean_flag(parser, 'use-velocities', default=False)
     boolean_flag(parser, 'normalize-returns', default=False)
@@ -151,13 +151,13 @@ def parse_args():
     parser.add_argument('--demo-terminality', type=int, default=5)
     parser.add_argument('--replay-alpha', type=float, default=0.8)
     parser.add_argument('--demo-epsilon', type=float, default=0.2)
-    parser.add_argument('--lambda-obj-conf-predict', type=float, default=10000.0)
-    parser.add_argument('--lambda-target-predict', type=float, default=10000.0)
-    parser.add_argument('--lambda-gripper-predict', type=float, default=10000.0)
+    parser.add_argument('--lambda-obj-conf-predict', type=float, default=500000.0)
+    parser.add_argument('--lambda-target-predict', type=float, default=500000.0)
+    parser.add_argument('--lambda-gripper-predict', type=float, default=500000.0)
 
     boolean_flag(parser, 'positive-reward', default=True)
     boolean_flag(parser, 'only-eval', default=False)
-    boolean_flag(parser, 'cloth', default=False)
+    boolean_flag(parser, 'cloth', default=True)
 
 
     boolean_flag(parser, 'evaluation', default=True)
