@@ -324,6 +324,10 @@ class DistributedTrain(object):
         if self.render_demo:
             renderer = Renderer("demo", self.run_name, 0)
         iteration = -1
+        successes = 0
+        total_r = 0
+        total_dones = 0
+
         for i in range(self.num_demo_steps):
 
             print ("Demo: {}/{}".format(i, self.num_demo_steps)
@@ -336,7 +340,9 @@ class DistributedTrain(object):
                 fn = demo_states_template.format(self.run_name, iteration)
                 self.demo_env.store_state(fn)
                 obs1, r, done, info = self.demo_env.step(action)
+                total_r += r
                 aux1, state1 = self.demo_env.get_aux(), self.demo_env.get_state()
+
                 transitions.append((state0, obs0, action, r, state1, obs1, done, None, None, aux0, aux1, iteration))
                 obs0, aux0, state0 = obs1, aux1, state1
                 if self.render_demo:
@@ -344,9 +350,13 @@ class DistributedTrain(object):
                     frames.append(frame)
 
                 if done:
+                    total_dones += 1
+
                     obs0, aux0, state0 = self.demo_env.reset(), self.demo_env.get_aux(), self.demo_env.get_state()
                     self.demo_policy.reset()
                     if r > 0:
+                        successes += 1
+
                         for t in transitions:
                             self.agent.store_transition(*t, demo=True)
                         if self.render_demo:
@@ -361,6 +371,8 @@ class DistributedTrain(object):
             renderer.finalize_and_upload()
 
         print("Collected {} demo transition.".format(self.agent.memory._num_demonstrations))
+        print("Successes {} .".format(successes))
+        print("Reward {} .".format(total_r / total_dones))
     def _write_summary(self):
         import git
         baselines_repo = git.Repo(home + "/fyp/src/baselines")
