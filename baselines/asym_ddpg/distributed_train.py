@@ -41,7 +41,7 @@ class Renderer(object):
         cv2.putText(frame,format(action[1], '.2f'), (5,25), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255,0,0), 1)
         cv2.putText(frame,format(action[2], '.2f'), (5,35), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255,0,0), 1)
         cv2.putText(frame,format(action[3], '.2f'), (40,25), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255,0,0), 1)
-        cv2.putText(frame,format(q, '.2f'), (40,35), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255,0,0), 1)
+        cv2.putText(frame,format(q[0][0], '.2f'), (40,35), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255,0,0), 1)
         self.rgb.write(frame)
 
     def finalize_and_upload(self):
@@ -96,7 +96,7 @@ class RolloutWorker(object):
                 self.agent.store_transition(state0, obs0, action, r, state1, obs1, done, None, None, aux0, aux1, None)
                 if self.renderer and self.steps_to_render > 0:
                     frame = env.render(mode="rgb_array")
-                    self.renderer.record_frame(frame, action, q)
+                    self.renderer.record_frame(frame,r, action, q)
                     self.steps_to_render -= 1
                 obs0, aux0, state0 = obs1, aux1, state1
                 if done:
@@ -366,7 +366,7 @@ class DistributedTrain(object):
                             self.agent.store_transition(*t, demo=True)
                         if self.render_demo:
                             for (j, frame) in enumerate(frames):
-                                renderer.record_frame(frame, transitions[j][3], transitions[j][2], 0)
+                                renderer.record_frame(frame, transitions[j][3], transitions[j][2],[[0]])
                         break
                     else:
                         print("Bad demo - throw away")
