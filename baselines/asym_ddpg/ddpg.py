@@ -326,7 +326,7 @@ class DDPG(object):
         self.target_in_eval = tf.placeholder(tf.float32, name='target_in_eval')
         self.target_eval = tf.summary.scalar("target_eval", self.target_in_eval)
 
-        self.writer = tf.summary.FileWriter(home + '/cloth_home/'+ self.run_name, graph=tf.get_default_graph())
+        self.writer = tf.summary.FileWriter(home + '/evaluation_summaries/'+ self.run_name, graph=tf.get_default_graph())
 
 
     def save_reward(self, r):
