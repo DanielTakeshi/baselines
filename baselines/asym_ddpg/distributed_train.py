@@ -175,6 +175,7 @@ class DistributedTrain(object):
             self._write_summary()
 
             sess.graph.finalize()
+            successes = 0
             if self.only_eval:
                 for i in range(20):
                     done = False
@@ -186,28 +187,33 @@ class DistributedTrain(object):
                         state0 = self.eval_env.get_state()
                         action, q, object_conf, gripper, target = self.agent.pi(obs, aux0, state0, apply_noise=False, compute_Q=True)
 
-                        self.eval_env.clearDebugText()
-                        def preprocess(pos):
-                            return np.clip(pos.reshape((3,)), [-1,-1,-1], [1,1,1])
-                        print (object_conf, gripper, target)
-
-                        self.eval_env.renderDebugText("grip", preprocess(gripper),textColorRGB= [1,0,0])
-                        self.eval_env.renderDebugText("actual_grip", preprocess(state0[0:3]),textColorRGB= [0,0,0])
-                        self.eval_env.renderDebugText("object_conf", preprocess(object_conf),textColorRGB= [0,1,0])
-                        self.eval_env.renderDebugText("target", preprocess(target),textColorRGB= [0,0,1])
+#                        self.eval_env.clearDebugText()
+#                        def preprocess(pos):
+#                            return np.clip(pos.reshape((3,)), [-1,-1,-1], [1,1,1])
+#                        print (object_conf, gripper, target)
+#
+#                        self.eval_env.renderDebugText("grip", preprocess(gripper),textColorRGB= [1,0,0])
+#                        self.eval_env.renderDebugText("actual_grip", preprocess(state0[0:3]),textColorRGB= [0,0,0])
+#                        self.eval_env.renderDebugText("object_conf", preprocess(object_conf),textColorRGB= [0,1,0])
+#                        self.eval_env.renderDebugText("target", preprocess(target),textColorRGB= [0,0,1])
 
 
                         try:
                             obs, r, done, info = self.eval_env.step(action)
-                            self.eval_env.render()
+#                            self.eval_env.render()
                         except StopIteration:
                             print ("interrupted iteration")
                             done = True
-                       
+                        if done and r > 0:
+                          print("success")
+                          successes += 1
+                        elif done:
+                          print("fail")
 
 
                         total_r += r
                     print(total_r)
+                print (successes)
                 return
 
             if self.demo_policy:
