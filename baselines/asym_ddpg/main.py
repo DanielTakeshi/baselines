@@ -1,7 +1,5 @@
 import argparse
 import time
-import os
-import logging
 from baselines import logger, bench
 from baselines.common.misc_util import (
     set_global_seeds,
@@ -9,14 +7,11 @@ from baselines.common.misc_util import (
 )
 import baselines.asym_ddpg.distributed_train as training
 from baselines.asym_ddpg.models import Actor, Critic
-from baselines.asym_ddpg.prioritized_memory import Memory
 from baselines.asym_ddpg.prioritized_memory import PrioritizedMemory
 from baselines.asym_ddpg.noise import *
-import sys
 import gym
 import tensorflow as tf
 from mpi4py import MPI
-import micoenv
 import learning.demo_policies as demo
 
 def run(env_id, eval_env_id, seed, noise_type, evaluation,demo_policy,use_velocities, num_dense_layers, dense_layer_size, layer_norm,demo_epsilon,replay_alpha,conv_size,cloth, **kwargs):
@@ -108,27 +103,26 @@ def parse_args():
     boolean_flag(parser, 'layer-norm', default=False)
     boolean_flag(parser, 'render', default=False)
     boolean_flag(parser, 'use-velocities', default=False)
-    boolean_flag(parser, 'normalize-returns', default=False)
     boolean_flag(parser, 'normalize-observations', default=True)
     boolean_flag(parser, 'normalize-state', default=True)
     boolean_flag(parser, 'normalize-aux', default=True)
     parser.add_argument('--seed', help='RNG seed', type=int, default=0)
     parser.add_argument('--critic-l2-reg', type=float, default=1e-2)
-    parser.add_argument('--batch-size', type=int, default=64)  # per MPI worker
+    parser.add_argument('--batch-size', type=int, default=64)
     parser.add_argument('--actor-lr', type=float, default=1e-4)
     parser.add_argument('--critic-lr', type=float, default=1e-3)
     boolean_flag(parser, 'popart', default=False)
     parser.add_argument('--gamma', type=float, default=0.999)
     parser.add_argument('--reward-scale', type=float, default=1.)
     parser.add_argument('--clip-norm', type=float, default=None)
-    parser.add_argument('--nb-epochs', type=int, default=500)  # with default settings, perform 1M steps total
+    parser.add_argument('--nb-epochs', type=int, default=500)
     parser.add_argument('--nb-epoch-cycles', type=int, default=20)
-    parser.add_argument('--nb-train-steps', type=int, default=50)  # per epoch cycle and MPI worker
-    parser.add_argument('--nb-eval-steps', type=int, default=2)  # per epoch cycle and MPI worker
-    parser.add_argument('--nb-rollout-steps', type=int, default=100)  # per epoch cycle and MPI worker
-    parser.add_argument('--noise-type', type=str, default='normal_0.2')  # choices are ou_xx, normal_xx, none
-    parser.add_argument('--load-file', type=str, default='')  # choices are adaptive-param_xx, ou_xx, normal_xx, none
-    parser.add_argument('--save-folder', type=str, default='')  # choices are adaptive-param_xx, ou_xx, normal_xx, none
+    parser.add_argument('--nb-train-steps', type=int, default=50)
+    parser.add_argument('--nb-eval-steps', type=int, default=2)
+    parser.add_argument('--nb-rollout-steps', type=int, default=100)
+    parser.add_argument('--noise-type', type=str, default='normal_0.2')
+    parser.add_argument('--load-file', type=str, default='')
+    parser.add_argument('--save-folder', type=str, default='')
     parser.add_argument('--conv-size', type=str, default='small')  
     parser.add_argument('--num-timesteps', type=int, default=None)
     parser.add_argument('--num-demo-steps', type=int, default=20)

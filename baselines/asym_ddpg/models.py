@@ -23,12 +23,11 @@ class Model(object):
 
 
 class Actor(Model):
-    def __init__(self, nb_actions, n_state,  num_dense_layers, dense_layer_size, layer_norm, cloth=False, conv_size='small',name='actor'):
+    def __init__(self, nb_actions, n_state,  num_dense_layers, dense_layer_size, layer_norm, conv_size='small',name='actor'):
         super(Actor, self).__init__( num_dense_layers, dense_layer_size, layer_norm,name=name)
         self.nb_actions = nb_actions
         self.n_state = n_state
         self.conv_size = conv_size
-        self.cloth = cloth
 
 
     def __call__(self, obs, aux, reuse=False):
@@ -64,12 +63,8 @@ class Actor(Model):
                 x = tc.layers.layer_norm(x, center=True, scale=True)
             x = tf.nn.relu(x)
 
-            if self.cloth:
-                obj_dim = 12
-                target_dim = 1
-            else:
-                obj_dim = 3
-                target_dim = 3
+            obj_dim = 3
+            target_dim = 3
 
             x = tf.layers.dense(x, self.dense_layer_size + 3 + obj_dim + target_dim)
 
@@ -84,8 +79,6 @@ class Actor(Model):
             x = tf.nn.relu(x)
             x = tf.layers.dense(x, self.nb_actions, kernel_initializer=tf.random_uniform_initializer(minval=-3e-3, maxval=3e-3))
             pi = tf.nn.tanh(x)
-
-
         return pi, object_conf, gripper, target
 
 

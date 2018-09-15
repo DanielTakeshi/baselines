@@ -27,13 +27,12 @@ class Memory(object):
         with self.lock:
             return len(self._storage)
 
-
     @property
     def total_transitions(self):
         with self.lock:
             return self._total_transitions
     
-    def grow_limit(self, num):
+    def grow_limit(self):
         with self.condition:
             self._total_transition_limit += self.nb_rollout_steps
             self.condition.notify_all()
@@ -139,17 +138,12 @@ class PrioritizedMemory(Memory):
         self._alpha = alpha
         self._transition_small_epsilon = transition_small_epsilon
         self._demo_epsilon = demo_epsilon
-
-
         it_capacity = 1
         while it_capacity < self._maxsize:
             it_capacity *= 2 # Size must be power of 2
-
         self._it_sum = SumSegmentTree(it_capacity)
         self._it_min = MinSegmentTree(it_capacity)
         self._max_priority = 1.0
-
-
 
     def append(self, *args, **kwargs):
         with self.condition:

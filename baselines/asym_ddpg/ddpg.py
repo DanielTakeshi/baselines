@@ -1,19 +1,18 @@
+import resource
 from copy import copy
 from functools import reduce
-import resource
+from pathlib import Path
+
+import baselines.common.tf_util as U
 import numpy as np
 import tensorflow as tf
 import tensorflow.contrib as tc
-
 from baselines import logger
 from baselines.common.mpi_adam import MpiAdam
-import baselines.common.tf_util as U
 from baselines.common.mpi_running_mean_std import RunningMeanStd
-from mpi4py import MPI
-import cv2
 
-from pathlib import Path
 home = str(Path.home())
+
 
 def normalize(x, stats):
     if stats is None:
@@ -26,13 +25,16 @@ def denormalize(x, stats):
         return x
     return x * stats.std + stats.mean
 
+
 def reduce_std(x, axis=None, keepdims=False):
     return tf.sqrt(reduce_var(x, axis=axis, keepdims=keepdims))
+
 
 def reduce_var(x, axis=None, keepdims=False):
     m = tf.reduce_mean(x, axis=axis, keep_dims=True)
     devs_squared = tf.square(x - m)
     return tf.reduce_mean(devs_squared, axis=axis, keep_dims=keepdims)
+
 
 def get_target_updates(vars, target_vars, tau):
     logger.info('setting up target updates ...')
@@ -48,13 +50,17 @@ def get_target_updates(vars, target_vars, tau):
     return tf.group(*init_updates), tf.group(*soft_updates)
 
 class DDPG(object):
-    def __init__(self, actor, critic, memory, observation_shape, action_shape, state_shape, aux_shape, lambda_obj_conf_predict, lambda_gripper_predict, lambda_target_predict, 
-         cloth, action_noise=None,
-        gamma=0.99, tau=0.001, normalize_returns=False, enable_popart=False, normalize_observations=True, normalize_state=True, normalize_aux=True,
-        batch_size=128, observation_range=(-10., 10.), action_range=(-1., 1.), state_range=(-4, 4), return_range=(-250, 10), aux_range=(-10, 10),
-        critic_l2_reg=0.001, actor_lr=1e-4, critic_lr=1e-3, clip_norm=None, reward_scale=1., replay_beta=0.4,lambda_1step=1.0,
-         lambda_nstep=1.0, nsteps=10, run_name="unnamed_run", lambda_pretrain=0.0, target_policy_noise=0.2, target_policy_noise_clip=0.5,
-          policy_and_target_update_period=2, num_critics=2, **kwargs):
+    def __init__(self, actor, critic, memory, observation_shape, action_shape, state_shape, aux_shape,
+                 lambda_obj_conf_predict, lambda_gripper_predict, lambda_target_predict, action_noise=None,
+                 gamma=0.99, tau=0.001, enable_popart=False, normalize_observations=True,
+                 normalize_state=True, normalize_aux=True,
+                 batch_size=128, observation_range=(-10., 10.), action_range=(-1., 1.), state_range=(-4, 4),
+                 return_range=(-250, 10), aux_range=(-10, 10),
+                 critic_l2_reg=0.001, actor_lr=1e-4, critic_lr=1e-3, clip_norm=None, reward_scale=1., replay_beta=0.4,
+                 lambda_1step=1.0,
+                 lambda_nstep=1.0, nsteps=10, run_name="unnamed_run", lambda_pretrain=0.0, target_policy_noise=0.2,
+                 target_policy_noise_clip=0.5,
+                 policy_and_target_update_period=2, num_critics=2, **kwargs):
 
         # Inputs.
         self.obs0 = tf.placeholder(tf.float32, shape=(None,) + observation_shape, name='obs0')
@@ -79,7 +85,6 @@ class DDPG(object):
         self.pretraining_tf = tf.placeholder(tf.float32, shape=(None, 1),
                                              name='pretraining_tf')  # whether we use pre training or not
         # Parameters.
-        self.cloth = cloth
         self.aux_shape = aux_shape
         self.gamma = gamma
         self.tau = tau
@@ -116,7 +121,6 @@ class DDPG(object):
         self.ep = 0
         self.policy_and_target_update_period = policy_and_target_update_period
 
-
         # Observation normalization.
         if self.normalize_observations:
             with tf.variable_scope('obs_rms'):
@@ -136,35 +140,33 @@ class DDPG(object):
         else:
             self.aux_rms = None
 
-        with tf.name_scope('obs_preprocess') as scope:
+        with tf.name_scope('obs_preprocess'):
             self.normalized_obs0 = tf.clip_by_value(normalize(self.obs0, self.obs_rms),
-                self.observation_range[0], self.observation_range[1])
+                                                    self.observation_range[0], self.observation_range[1])
             self.normalized_obs1 = tf.clip_by_value(normalize(self.obs1, self.obs_rms),
-                self.observation_range[0], self.observation_range[1])
+                                                    self.observation_range[0], self.observation_range[1])
         with tf.name_scope('state_preprocess'):
             self.normalized_state0 = tf.clip_by_value(normalize(self.state0, self.state_rms),
-                self.state_range[0], self.state_range[1])
+                                                      self.state_range[0], self.state_range[1])
             self.normalized_state1 = tf.clip_by_value(normalize(self.state1, self.state_rms),
-                self.state_range[0], self.state_range[1])
+                                                      self.state_range[0], self.state_range[1])
 
         with tf.name_scope('aux_preprocess'):
             self.normalized_aux0 = tf.clip_by_value(normalize(self.aux0, self.aux_rms),
-                    self.aux_range[0], self.aux_range[1])
+                                                    self.aux_range[0], self.aux_range[1])
             self.normalized_aux1 = tf.clip_by_value(normalize(self.aux1, self.aux_rms),
-                    self.aux_range[0], self.aux_range[1])
-
-
+                                                    self.aux_range[0], self.aux_range[1])
 
         # Create target networks.
         target_actor = copy(actor)
         target_actor.name = 'target_actor'
         self.target_actor = target_actor
 
-        self.actor_tf, self.obj_conf, self.gripper, self.target  = actor(self.normalized_obs0, self.normalized_aux0)
+        self.actor_tf, self.obj_conf, self.gripper, self.target = actor(self.normalized_obs0, self.normalized_aux0)
         next_actions, _, _, _ = target_actor(self.normalized_obs1, self.normalized_aux1)
         noise = tf.distributions.Normal(tf.zeros_like(next_actions),
-            self.target_policy_noise
-        ).sample()
+                                        self.target_policy_noise
+                                        ).sample()
         noise = tf.clip_by_value(
             noise,
             -self.target_policy_noise_clip,
@@ -173,7 +175,7 @@ class DDPG(object):
 
         self.num_critics = num_critics
         self.critics = [None] * num_critics
-        self.target_critics =  [None] * num_critics
+        self.target_critics = [None] * num_critics
         self.critic_tfs = [None] * num_critics
         self.critic_with_actor_tfs = [None] * num_critics
         self.step_1_td_losses = [None] * num_critics
@@ -188,9 +190,13 @@ class DDPG(object):
             current_critic.name = "critic" + str(i)
             self.critics[i] = current_critic
             self.target_critics[i] = copy(current_critic)
-            self.target_critics[i].name = 'target_critic'+str(i)
-            self.critic_tfs[i] = tf.clip_by_value(current_critic(self.normalized_state0, self.actions, self.normalized_aux0), self.return_range[0], self.return_range[1])
-            self.critic_with_actor_tfs[i] = tf.clip_by_value(current_critic(self.normalized_state0, self.actor_tf, self.normalized_aux0, reuse=True), self.return_range[0], self.return_range[1])
+            self.target_critics[i].name = 'target_critic' + str(i)
+            self.critic_tfs[i] = tf.clip_by_value(
+                current_critic(self.normalized_state0, self.actions, self.normalized_aux0), self.return_range[0],
+                self.return_range[1])
+            self.critic_with_actor_tfs[i] = tf.clip_by_value(
+                current_critic(self.normalized_state0, self.actor_tf, self.normalized_aux0, reuse=True),
+                self.return_range[0], self.return_range[1])
             Q_obs1s[i] = self.target_critics[i](self.normalized_state1, next_actions + noise, self.normalized_aux1)
 
         if num_critics == 2:
@@ -209,9 +215,9 @@ class DDPG(object):
 
     def setup_target_network_updates(self):
         with tf.name_scope('target_net_updates'):
-
-            actor_init_updates, actor_soft_updates = get_target_updates(self.actor.vars, self.target_actor.vars, self.tau)
-            target_init_updates = [actor_init_updates] 
+            actor_init_updates, actor_soft_updates = get_target_updates(self.actor.vars, self.target_actor.vars,
+                                                                        self.tau)
+            target_init_updates = [actor_init_updates]
             target_soft_updates = [actor_soft_updates]
             for i in range(self.num_critics):
                 init, soft = get_target_updates(self.critics[i].vars, self.target_critics[i].vars, self.tau)
@@ -227,22 +233,17 @@ class DDPG(object):
             self.action_diffs = tf.reduce_mean(tf.square(self.actions - self.actor_tf), 1)
             demo_better_than_critic = self.critic_tfs[0] < self.critic_with_actor_tfs[0]
             demo_better_than_critic = self.pretraining_tf * tf.cast(demo_better_than_critic, tf.float32)
-            self.bc_loss = (tf.reduce_sum(demo_better_than_critic * self.action_diffs) * self.lambda_pretrain / (tf.reduce_sum(self.pretraining_tf) + 1e-6))
+            self.bc_loss = (tf.reduce_sum(demo_better_than_critic * self.action_diffs) * self.lambda_pretrain / (
+                    tf.reduce_sum(self.pretraining_tf) + 1e-6))
             self.original_actor_loss = -tf.reduce_mean(self.critic_with_actor_tfs[0])
-            if self.cloth:
-                self.obj_conf_loss = tf.reduce_mean(tf.square(self.obj_conf - self.state0 [:,5:17])) * self.lambda_obj_conf_predict
-                self.gripper_loss = tf.reduce_mean(tf.square(self.gripper - self.state0[:,0:3])) * self.lambda_gripper_predict
-                if self.state0.shape[1] > 25:
-                    self.target_loss = tf.reduce_mean(tf.square(self.target - self.state0[:,25:26])) * self.lambda_target_predict
-                else:
-                    self.target_loss = 0
 
-            else:
 
-                self.obj_conf_loss = tf.reduce_mean(tf.square(self.obj_conf - self.state0 [:, 8:11])) * self.lambda_obj_conf_predict
-                self.gripper_loss = tf.reduce_mean(tf.square(self.gripper - self.state0[:,0:3])) * self.lambda_gripper_predict
-                self.target_loss = tf.reduce_mean(tf.square(self.target - self.state0[:,3:6])) * self.lambda_target_predict
-
+            self.obj_conf_loss = tf.reduce_mean(
+                tf.square(self.obj_conf - self.state0[:, 8:11])) * self.lambda_obj_conf_predict
+            self.gripper_loss = tf.reduce_mean(
+                tf.square(self.gripper - self.state0[:, 0:3])) * self.lambda_gripper_predict
+            self.target_loss = tf.reduce_mean(
+                tf.square(self.target - self.state0[:, 3:6])) * self.lambda_target_predict
 
             self.actor_loss = self.original_actor_loss + self.bc_loss + self.obj_conf_loss + self.gripper_loss + self.target_loss
             self.number_of_demos_better = tf.reduce_sum(demo_better_than_critic)
@@ -252,13 +253,14 @@ class DDPG(object):
             logger.info('  actor params: {}'.format(actor_nb_params))
             self.actor_grads = U.flatgrad(self.actor_loss, self.actor.trainable_vars, clip_norm=self.clip_norm)
             self.actor_optimizer = MpiAdam(var_list=self.actor.trainable_vars,
-                beta1=0.9, beta2=0.999, epsilon=1e-08)
+                                           beta1=0.9, beta2=0.999, epsilon=1e-08)
 
     def setup_critic_optimizer(self, i):
-        with tf.name_scope('critic_optimizer'+str(i)):
+        with tf.name_scope('critic_optimizer' + str(i)):
             critic_target_tf = tf.clip_by_value(self.critic_target, self.return_range[0], self.return_range[1])
 
-            nstep_critic_target_tf = tf.clip_by_value(self.nstep_critic_target, self.return_range[0], self.return_range[1])
+            nstep_critic_target_tf = tf.clip_by_value(self.nstep_critic_target, self.return_range[0],
+                                                      self.return_range[1])
 
             td_error = tf.square(self.critic_tfs[i] - critic_target_tf)
 
@@ -272,7 +274,8 @@ class DDPG(object):
             self.critic_losses[i] = self.step_1_td_losses[i] + self.n_step_td_losses[i]
 
             if self.critic_l2_reg > 0.:
-                critic_reg_vars = [var for var in self.critics[i].trainable_vars if 'kernel' in var.name and 'output' not in var.name]
+                critic_reg_vars = [var for var in self.critics[i].trainable_vars if
+                                   'kernel' in var.name and 'output' not in var.name]
                 for var in critic_reg_vars:
                     logger.info('  regularizing: {}'.format(var.name))
                 logger.info('  applying l2 regularization with {}'.format(self.critic_l2_reg))
@@ -285,11 +288,10 @@ class DDPG(object):
             critic_nb_params = sum([reduce(lambda x, y: x * y, shape) for shape in critic_shapes])
             logger.info('  critic shapes: {}'.format(critic_shapes))
             logger.info('  critic params: {}'.format(critic_nb_params))
-            self.critic_grads[i] = U.flatgrad(self.critic_losses[i], self.critics[i].trainable_vars, clip_norm=self.clip_norm)
+            self.critic_grads[i] = U.flatgrad(self.critic_losses[i], self.critics[i].trainable_vars,
+                                              clip_norm=self.clip_norm)
             self.critic_optimizers[i] = MpiAdam(var_list=self.critics[i].trainable_vars,
-                beta1=0.9, beta2=0.999, epsilon=1e-08)
-
-
+                                                beta1=0.9, beta2=0.999, epsilon=1e-08)
 
     def setup_summaries(self):
         tf.summary.scalar("actor_loss", self.actor_loss)
@@ -316,7 +318,6 @@ class DDPG(object):
         self.r_plot_in_eval = tf.placeholder(tf.float32, name='r_plot_in_eval')
         self.r_plot_eval = tf.summary.scalar("returns_eval", self.r_plot_in_eval)
 
-
         self.obj_conf_in_eval = tf.placeholder(tf.float32, name='obj_conf_in_eval')
         self.obj_conf_eval = tf.summary.scalar("obj_conf_eval", self.obj_conf_in_eval)
 
@@ -326,18 +327,20 @@ class DDPG(object):
         self.target_in_eval = tf.placeholder(tf.float32, name='target_in_eval')
         self.target_eval = tf.summary.scalar("target_eval", self.target_in_eval)
 
-        self.writer = tf.summary.FileWriter(home + '/evaluation_summaries/'+ self.run_name, graph=tf.get_default_graph())
-
+        self.writer = tf.summary.FileWriter(home + '/evaluation_summaries/' + self.run_name,
+                                            graph=tf.get_default_graph())
 
     def save_reward(self, r):
         self.ep += 1
         summary = self.sess.run(self.r_plot, feed_dict={self.r_plot_in: r})
         self.writer.add_summary(summary, self.ep)
 
-
     def save_aux_prediction(self, obj_conf, grip, target):
         self.ep += 1
-        obj_conf_summ, grip_summ, target_summ = self.sess.run([self.obj_conf_eval, self.grip_eval, self.target_eval], feed_dict={self.obj_conf_in_eval: obj_conf, self.grip_in_eval: grip, self.target_in_eval:target  })
+        obj_conf_summ, grip_summ, target_summ = self.sess.run([self.obj_conf_eval, self.grip_eval, self.target_eval],
+                                                              feed_dict={self.obj_conf_in_eval: obj_conf,
+                                                                         self.grip_in_eval: grip,
+                                                                         self.target_in_eval: target})
         self.writer.add_summary(obj_conf_summ, self.ep)
         self.writer.add_summary(grip_summ, self.ep)
         self.writer.add_summary(target_summ, self.ep)
@@ -348,7 +351,6 @@ class DDPG(object):
 
     def setup_stats(self):
         with tf.name_scope('stats'):
-
             ops = []
             names = []
 
@@ -377,13 +379,16 @@ class DDPG(object):
     def pi(self, obs, aux, state0, apply_noise=True, compute_Q=True):
 
         actor_tf = self.actor_tf
-        feed_dict = {self.obs0: [obs], self.aux0: [aux], self.state0:[ state0]}
+        feed_dict = {self.obs0: [obs], self.aux0: [aux], self.state0: [state0]}
         if compute_Q:
 
-            action, q, obj_conf, gripper, target = self.sess.run([actor_tf, self.critic_with_actor_tfs[0], self.obj_conf, self.gripper, self.target], feed_dict=feed_dict)
+            action, q, obj_conf, gripper, target = self.sess.run(
+                [actor_tf, self.critic_with_actor_tfs[0], self.obj_conf, self.gripper, self.target],
+                feed_dict=feed_dict)
 
         else:
-            action, obj_conf, gripper, target = self.sess.run([actor_tf, self.obj_conf, self.gripper, self.target], feed_dict=feed_dict)
+            action, obj_conf, gripper, target = self.sess.run([actor_tf, self.obj_conf, self.gripper, self.target],
+                                                              feed_dict=feed_dict)
             q = None
         action = action.flatten()
         if self.action_noise is not None and apply_noise:
@@ -395,14 +400,16 @@ class DDPG(object):
 
         return action, q, obj_conf, gripper, target
 
-    def store_transition(self, state, obs0, action, reward, state1, obs1, terminal1, goal, goalobs, aux0, aux1,i, demo=False):
-        assert goal == None
-        assert goalobs == None
+    def store_transition(self, state, obs0, action, reward, state1, obs1, terminal1, goal, goalobs, aux0, aux1, i,
+                         demo=False):
+        assert goal is None
+        assert goalobs is None
         reward *= self.reward_scale
         if demo:
-            self.memory.append_demonstration(state, obs0, action, reward, state1, obs1, terminal1, goal, goalobs, aux0, aux1,i)
+            self.memory.append_demonstration(state, obs0, action, reward, state1, obs1, terminal1, goal, goalobs, aux0,
+                                             aux1, i)
         else:
-            assert i == None
+            assert i is None
             self.memory.append(state, obs0, action, reward, state1, obs1, terminal1, goal, goalobs, aux0, aux1, i)
         if self.normalize_observations:
             self.obs_rms.update(np.array([obs0]))
@@ -415,7 +422,9 @@ class DDPG(object):
 
     def train(self, iteration, pretrain=False):
         # Get a batch.
-        batch, n_step_batch, percentage = self.memory.sample_rollout(batch_size=self.batch_size, nsteps=self.nsteps, beta=self.replay_beta, gamma=self.gamma, pretrain=pretrain)
+        batch, n_step_batch, percentage = self.memory.sample_rollout(batch_size=self.batch_size, nsteps=self.nsteps,
+                                                                     beta=self.replay_beta, gamma=self.gamma,
+                                                                     pretrain=pretrain)
 
         target_Q_1step = self.sess.run(self.target_Q, feed_dict={
             self.obs1: batch['obs1'],
@@ -438,8 +447,8 @@ class DDPG(object):
         critic_losses = [None] * self.num_critics
         td_errors = [None] * self.num_critics
         # Get all gradients and perform a synced update.
-        ops = [self.actor_grads, self.actor_loss, *self.critic_grads, *self.critic_losses, *self.td_errors, self.scalar_summaries]
-        
+        ops = [self.actor_grads, self.actor_loss, *self.critic_grads, *self.critic_losses, *self.td_errors,
+               self.scalar_summaries]
 
         ret = self.sess.run(ops, feed_dict={
             self.obs0: batch['obs0'],
@@ -450,12 +459,12 @@ class DDPG(object):
             self.critic_target: target_Q_1step,
             self.nstep_critic_target: target_Q_nstep,
             self.pretraining_tf: batch['demos'].astype('float32'),
-            self.importance_weights: batch['weights'],
             self.memory_size: len(self.memory._storage),
             self.rss: resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         })
         if self.num_critics == 2:
-            actor_grads, actor_loss, critic_grads[0], critic_grads[1], critic_losses[0], critic_losses[1], td_errors[0], td_errors[1], scalar_summaries = ret
+            actor_grads, actor_loss, critic_grads[0], critic_grads[1], critic_losses[0], critic_losses[1], td_errors[0], \
+            td_errors[1], scalar_summaries = ret
         else:
             actor_grads, actor_loss, critic_grads[0], critic_losses[0], td_errors[0], scalar_summaries = ret
         self.memory.update_priorities(batch['idxes'], td_errors[0])
@@ -498,7 +507,6 @@ class DDPG(object):
         assert len(names) == len(values)
         stats = dict(zip(names, values))
 
-
         return stats
 
     def reset(self):
@@ -508,36 +516,34 @@ class DDPG(object):
 
     def write_summary(self, summary):
         agent_summary = {
-            "gamma" : self.gamma,
-            "tau" : self.tau,
-            "normalize_observations" : self.normalize_observations,
-            "normalize_state" : self.normalize_state,
-            "normalize_aux" : self.normalize_aux,
-            "action_noise" : self.action_noise,
-            "action_range" : self.action_range,
-            "return_range" : self.return_range,
-            "observation_range" : self.observation_range,
-            "actor_lr" : self.actor_lr,
-            "state_range" : self.state_range,
-            "critic_lr" : self.critic_lr,
-            "clip_norm" : self.clip_norm,
-            "enable_popart" : self.enable_popart,
-            "reward_scale" : self.reward_scale,
-            "batch_size" : self.batch_size,
-            "critic_l2_reg" : self.critic_l2_reg,
-            "lambda_nstep" : self.lambda_nstep,
-            "lambda_1step" : self.lambda_1step,
-            "nsteps" : self.nsteps,
-            "replay_beta" : self.replay_beta,
-            "run_name" : self.run_name,
-            "lambda_pretrain" : self.lambda_pretrain,
-            "target_policy_noise" : self.target_policy_noise,
-            "target_policy_noise_clip" : self.target_policy_noise_clip,
-            "lambda_obj_conf_predict" : self.lambda_obj_conf_predict,
-            "lambda_target_predict" : self.lambda_target_predict,
-            "lambda_gripper_predict" : self.lambda_gripper_predict,
-
-
+            "gamma": self.gamma,
+            "tau": self.tau,
+            "normalize_observations": self.normalize_observations,
+            "normalize_state": self.normalize_state,
+            "normalize_aux": self.normalize_aux,
+            "action_noise": self.action_noise,
+            "action_range": self.action_range,
+            "return_range": self.return_range,
+            "observation_range": self.observation_range,
+            "actor_lr": self.actor_lr,
+            "state_range": self.state_range,
+            "critic_lr": self.critic_lr,
+            "clip_norm": self.clip_norm,
+            "enable_popart": self.enable_popart,
+            "reward_scale": self.reward_scale,
+            "batch_size": self.batch_size,
+            "critic_l2_reg": self.critic_l2_reg,
+            "lambda_nstep": self.lambda_nstep,
+            "lambda_1step": self.lambda_1step,
+            "nsteps": self.nsteps,
+            "replay_beta": self.replay_beta,
+            "run_name": self.run_name,
+            "lambda_pretrain": self.lambda_pretrain,
+            "target_policy_noise": self.target_policy_noise,
+            "target_policy_noise_clip": self.target_policy_noise_clip,
+            "lambda_obj_conf_predict": self.lambda_obj_conf_predict,
+            "lambda_target_predict": self.lambda_target_predict,
+            "lambda_gripper_predict": self.lambda_gripper_predict,
         }
         summary["agent_summary"] = agent_summary
         md_string = self._markdownize_summary(summary)
